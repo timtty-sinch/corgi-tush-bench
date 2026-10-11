@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corgi Tush Bench manifest",
+  "type": "object",
+  "required": ["schema_version", "prompts", "runs"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["version", "file", "sha256", "frozen"],
+        "properties": {
+          "version": { "type": "string", "pattern": "^v[0-9]+$" },
+          "file": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "frozen": { "type": "boolean" }
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "model", "harness", "effort", "date", "prompt_version", "first_try", "file", "sha256", "params", "scores"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*-[0-9]{8}(-[b-z])?$", "description": "<model-slug>[-<effort>]-<yyyymmdd>[-b..]" },
+          "model": {
+            "type": "object",
+            "required": ["id", "name", "provider"],
+            "properties": {
+              "id": { "type": "string", "description": "Exact API model id" },
+              "name": { "type": "string", "description": "Display name" },
+              "provider": { "type": "string" }
+            }
+          },
+          "harness": {
+            "type": "object",
+            "properties": {
+              "name": { "type": ["string", "null"] },
+              "version": { "type": ["string", "null"] }
+            }
+          },
+          "effort": { "type": ["string", "null"], "description": "Effort/thinking setting as the harness names it; null if unknown" },
+          "date": { "type": "string", "format": "date" },
+          "prompt_version": { "type": "string", "pattern": "^v[0-9]+$" },
+          "first_try": { "type": ["boolean", "null"], "description": "Delivered file loaded and rendered without human edits" },
+          "wall_min": { "type": ["number", "null"] },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": { "type": ["integer", "null"] },
+              "output": { "type": ["integer", "null"] }
+            }
+          },
+          "cost_usd": { "type": ["number", "null"] },
+          "file": { "type": "string", "pattern": "^runs/[^/]+/index\\.html$" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the delivered file; proves it wasn't edited" },
+          "three_version": { "type": ["string", "null"] },
+          "params": {
+            "type": "object",
+            "description": "How to drive this run from the URL hash. v1 runs: seed true, coat map is identity.",
+            "required": ["seed", "coat"],
+            "properties": {
+              "seed": { "type": "boolean" },
+              "coat": {
+                "type": ["object", "null"],
+                "description": "Canonical coat name -> value this run accepts in #coat=; null if unsupported",
+                "properties": {
+                  "red": { "type": "string" }, "sable": { "type": "string" },
+                  "tri": { "type": "string" }, "bht": { "type": "string" }
+                }
+              }
+            }
+          },
+          "scores": {
+            "type": ["object", "null"],
+            "properties": {
+              "anatomy": { "type": "number", "minimum": 0, "maximum": 10 },
+              "fur": { "type": "number", "minimum": 0, "maximum": 10 },
+              "wiggle": { "type": "number", "minimum": 0, "maximum": 10 },
+              "reliability": { "type": "number", "minimum": 0, "maximum": 10 }
+            }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

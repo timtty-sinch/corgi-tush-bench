@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Corgi Tush Bench</title>
+<meta name="description" content="One prompt, many models: every AI builds a wiggly 3D corgi rump in a single HTML file. Watch them live and compare side by side.">
+<meta property="og:title" content="Corgi Tush Bench">
+<meta property="og:description" content="One prompt, many models: every AI builds a wiggly 3D corgi rump in a single HTML file.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="__SITE_ORIGIN__/">
+<meta property="og:image" content="__SITE_ORIGIN__/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Corgi Tush Bench: a 3D corgi rump rendered by an AI model">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#22304a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ring:#22304a;      /* show-ring navy: page */
+    --ring-2:#2d3e5e;    /* raised surfaces */
+    --line:#3d5078;
+    --ink:#f4f0e8;
+    --muted:#b3bccd;
+    --gold:#f2b632;      /* rosette gold: focus, selection */
+    --pane:#e9e3da;      /* matches the renders' own backdrop */
+    --band:#fbfaf6; --band-ink:#1c2538;
+    --display:'Bricolage Grotesque',system-ui,sans-serif;
+    --body:'Atkinson Hyperlegible',system-ui,sans-serif;
+    --pane-w:min(400px, calc(100vw - 32px));
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--ring);color:var(--ink);font:16px/1.5 var(--body)}
+  a{color:var(--ink);text-underline-offset:3px}
+  a:hover{color:var(--gold)}
+  :focus-visible{outline:3px solid var(--gold);outline-offset:3px;border-radius:4px}
+  button,select{font:inherit;color:inherit}
+
+  /* Masthead */
+  .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px;padding:28px 24px 8px;max-width:1720px;margin:0 auto}
+  .brand{margin:0;font:800 clamp(40px,7vw,84px)/.9 var(--display);letter-spacing:-.035em}
+  .brand a{text-decoration:none}
+  .lede{margin:12px 0 0;max-width:56ch;color:var(--muted)}
+  nav.links{display:flex;gap:20px;padding-bottom:6px}
+  nav.links a,nav.links button{background:none;border:0;padding:0;cursor:pointer;font-weight:700;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:5px}
+  nav.links a:hover,nav.links button:hover{color:var(--gold);text-decoration-color:var(--gold)}
+
+  /* Controls */
+  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:16px 24px;max-width:1720px;margin:0 auto}
+  .group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .group > span{color:var(--muted);margin-right:4px}
+  .chip{background:transparent;border:1.5px solid var(--line);border-radius:999px;padding:5px 13px;cursor:pointer}
+  .chip:hover{border-color:var(--muted)}
+  .chip[aria-pressed=true]{background:var(--gold);border-color:var(--gold);color:var(--band-ink);font-weight:700}
+  .hint{color:var(--muted);font-size:14px;margin-left:auto}
+
+  /* Strip of entries */
+  .strip{display:flex;gap:24px;overflow-x:auto;scroll-snap-type:x mandatory;padding:12px 24px 28px;scroll-padding:0 24px}
+  .strip.grid{flex-wrap:wrap;justify-content:center;overflow:visible}
+  .entry{flex:0 0 var(--pane-w);scroll-snap-align:start;margin:0}
+  .stage{position:relative;width:var(--pane-w);aspect-ratio:1;border-radius:16px;overflow:hidden;background:var(--pane)}
+  .stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+  .stage .load{position:absolute;inset:0;display:grid;place-items:center;width:100%;border:0;background:var(--pane);color:#5b5146;cursor:pointer;font-weight:700}
+  .stage .load:hover{color:#2b241d}
+  .armband{position:absolute;top:12px;left:12px;z-index:2;background:var(--band);color:var(--band-ink);border-radius:4px;padding:2px 10px 3px;font:800 22px/1.1 var(--display);letter-spacing:-.02em;box-shadow:0 1px 0 rgba(28,37,56,.25);pointer-events:none}
+  .caption{padding:12px 2px 0}
+  .caption h2{margin:0;font:800 22px/1.15 var(--display);letter-spacing:-.015em}
+  .caption h2 a{text-decoration:none}
+  .facts{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:8px 0 0;font-size:14px}
+  .facts dt{color:var(--muted)}
+  .facts dd{margin:0}
+  .actions{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:10px;font-size:14px}
+  .actions label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .actions input{accent-color:var(--gold);width:16px;height:16px}
+  .actions .remove{background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;color:var(--muted)}
+
+  /* Compare tray */
+  .tray{position:sticky;bottom:0;display:none;align-items:center;justify-content:center;gap:16px;padding:12px 16px;background:var(--ring-2);border-top:1px solid var(--line)}
+  .tray.on{display:flex}
+  .btn{background:var(--gold);color:var(--band-ink);border:0;border-radius:999px;padding:8px 18px;font-weight:700;cursor:pointer}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .btn.quiet{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+
+  /* Single run */
+  .run{display:flex;flex-wrap:wrap;gap:32px;padding:12px 24px 40px;max-width:1100px;margin:0 auto}
+  .run .details{flex:1 1 320px;min-width:0}
+  .run h2{margin:0 0 4px;font:800 clamp(28px,4vw,44px)/1.05 var(--display);letter-spacing:-.025em}
+  .run .facts{font-size:15px;gap:6px 18px;margin-top:18px}
+  .run .facts dd{overflow-wrap:anywhere}
+  .run .notes{margin:18px 0 0;color:var(--muted);max-width:60ch}
+  .run .actions{margin-top:22px;font-size:15px}
+
+  .empty{padding:40px 24px;color:var(--muted);max-width:60ch;margin:0 auto}
+  .empty code{color:var(--ink)}
+
+  [hidden]{display:none!important}
+
+  /* Vote */
+  .vote{padding:4px 0 32px}
+  .vote-head{max-width:1720px;margin:0 auto;padding:0 24px;text-align:center}
+  .vote-head p{margin-left:auto!important;margin-right:auto!important}
+  .vote-head h2,.board h2{margin:0;font:800 clamp(28px,4vw,44px)/1.05 var(--display);letter-spacing:-.025em}
+  .vote-head p,.board .sub{margin:8px 0 0;color:var(--muted);max-width:62ch}
+  .side{margin:0;font:800 22px/1.15 var(--display);letter-spacing:-.015em}
+  .side.revealed,.side.revealed a{color:var(--gold)}
+  .vote-bar{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:12px;padding:8px 24px 0}
+  .vote-bar .btn{padding:12px 26px;font-size:17px}
+  @media (max-width:480px){.vote-bar{gap:8px}.vote-bar .btn{padding:10px 16px;font-size:16px}}
+  .status{flex-basis:100%;text-align:center;color:var(--muted);min-height:1.5em;margin:4px 0 0}
+
+  /* Leaderboard */
+  .board{max-width:900px;margin:0 auto;padding:4px 24px 40px}
+  .board .controls{padding:16px 0 0}
+  .table-wrap{overflow-x:auto;margin-top:20px}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:400;font-size:14px}
+  td.num,th.num{text-align:right}
+  td.rank{font:800 22px/1 var(--display);width:1%}
+  td.name a{font-weight:700;text-decoration:none}
+  td.name a:hover{text-decoration:underline}
+  .prov{color:var(--muted);font-size:13px;margin-left:6px}
+  .board .after{display:flex;gap:16px;align-items:center;margin-top:24px}
+
+  footer{padding:24px;color:var(--muted);font-size:14px;max-width:1720px;margin:0 auto;border-top:1px solid var(--line)}
+  footer a{color:var(--muted)}
+
+  /* Prompt dialog */
+  dialog{width:min(760px,calc(100vw - 32px));max-height:min(80vh,900px);padding:0;border:0;border-radius:16px;background:var(--ring-2);color:var(--ink)}
+  dialog::backdrop{background:rgba(12,18,30,.7)}
+  .dlg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--ring-2)}
+  .dlg-head h2{margin:0;font:800 22px/1.2 var(--display)}
+  .dlg-head .group{gap:8px}
+  dialog pre{margin:0;padding:20px;white-space:pre-wrap;font:14px/1.6 var(--body);max-width:80ch}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1 class="brand"><a href="./">Corgi Tush Bench</a></h1>
+    <p class="lede">Every model gets the same prompt: build a wiggly 3D corgi rump in one HTML file. Drag a dog to walk around it, click it to make it wiggle.</p>
+  </div>
+  <nav class="links">
+    <a href="?vote">Vote</a>
+    <a href="?board">Leaderboard</a>
+    <button type="button" id="open-prompt">Prompt</button>
+    <a href="contribute.html">Contribute</a>
+  </nav>
+</header>
+
+<div class="controls" id="controls">
+  <div class="group" role="group" aria-label="Coat">
+    <span>Coat</span>
+    <!-- filled by script -->
+  </div>
+  <div class="group" role="group" aria-label="Prompt version" id="versions"></div>
+  <span class="hint" id="hint">Scroll sideways for more entries</span>
+</div>
+
+<main id="main"></main>
+
+<div class="tray" id="tray" aria-live="polite">
+  <span id="tray-count"></span>
+  <button class="btn" id="tray-go" type="button">Compare</button>
+  <button class="btn quiet" id="tray-clear" type="button">Clear</button>
+</div>
+
+<footer>
+  Entries are the models' files exactly as delivered, unedited. Each file's hash is in <a href="manifest.json">manifest.json</a>. Up to four entries run live at once; the rest load as you scroll to them.
+</footer>
+
+<dialog id="prompt-dlg" aria-labelledby="prompt-title">
+  <div class="dlg-head">
+    <h2 id="prompt-title">Prompt</h2>
+    <div class="group">
+      <button class="btn" id="copy-prompt" type="button">Copy prompt</button>
+      <button class="btn quiet" id="close-prompt" type="button">Close</button>
+    </div>
+  </div>
+  <pre id="prompt-text">Loading…</pre>
+</dialog>
+
+<script>
+/* Where run files are served from. build.sh fills this in for production with a separate
+   origin, so model-written code never shares the site's origin. Locally it stays same-folder. */
+const RUNS_ORIGIN = '__RUNS_ORIGIN__'.startsWith('__') ? '' : '__RUNS_ORIGIN__';
+const MAX_LIVE = 4;
+const MAX_COMPARE = 4;
+const COATS = [['random', 'Random'], ['red', 'Red and white'], ['sable', 'Sable'], ['tri', 'Tricolor'], ['bht', 'Black-headed tricolor']];
+
+const $ = (s, el = document) => el.querySelector(s);
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'text') el.textContent = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  el.append(...kids.flat().filter(k => k != null));
+  return el;
+};
+
+let manifest, runs = [];
+const q = new URLSearchParams(location.search);
+const state = {
+  coat: COATS.some(c => c[0] === q.get('coat')) ? q.get('coat') : 'random',
+  seed: /^\d+$/.test(q.get('seed') || '') ? q.get('seed') : String(Math.floor(Math.random() * 1e6)),
+  version: q.get('v') || 'all',
+  compare: (q.get('compare') || '').split(',').filter(Boolean),
+  run: q.get('run'),
+  mode: q.has('vote') ? 'vote' : q.has('board') ? 'board' : null,
+  picked: new Set(),
+};
+
+function syncUrl() {
+  if (state.mode) {
+    history.replaceState(null, '', '?' + state.mode + (state.version !== 'all' ? '&v=' + state.version : ''));
+    return;
+  }
+  const p = new URLSearchParams();
+  if (state.run) p.set('run', state.run);
+  else if (state.compare.length) p.set('compare', state.compare.join(','));
+  else if (state.version !== 'all') p.set('v', state.version);
+  if (state.coat !== 'random') p.set('coat', state.coat);
+  if (state.run || state.compare.length) p.set('seed', state.seed);
+  const s = p.toString();
+  history.replaceState(null, '', s ? '?' + s : location.pathname);
+}
+
+/* ---------- live iframe management ---------- */
+const live = []; // stages with a running iframe, oldest first
+
+function srcFor(run, coat = state.coat, seed = state.seed) {
+  const parts = [];
+  if (run.params.seed) parts.push('seed=' + seed);
+  if (coat !== 'random' && run.params.coat && run.params.coat[coat]) parts.push('coat=' + run.params.coat[coat]);
+  return RUNS_ORIGIN + run.file + (parts.length ? '#' + parts.join('&') : '');
+}
+
+function load(stage) {
+  unload(stage, true);
+  const run = stage._run;
+  // A new iframe every time: the runs read their hash only at load, and a hash-only src change wouldn't reload.
+  const f = h('iframe', { src: srcFor(run, stage._coat, stage._seed), sandbox: 'allow-scripts', title: run.model.name + ', live render', loading: 'eager' });
+  stage.append(f);
+  stage._placeholder.hidden = true;
+  live.push(stage);
+  while (live.length > MAX_LIVE) unload(live[0]);
+}
+
+function unload(stage, quiet) {
+  const i = live.indexOf(stage);
+  if (i >= 0) live.splice(i, 1);
+  const f = stage.querySelector('iframe');
+  if (f) f.remove();
+  if (!quiet) stage._placeholder.hidden = false;
+}
+
+function reloadLive() { [...live].forEach(load); }
+
+const io = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    const stage = e.target;
+    if (e.intersectionRatio >= 0.55 && !live.includes(stage)) load(stage);
+    else if (e.intersectionRatio === 0 && live.includes(stage)) unload(stage);
+  }
+}, { threshold: [0, 0.55] });
+
+/* ---------- building blocks ---------- */
+const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const entryNo = run => runs.indexOf(run) + 1;
+
+function stageFor(run, { observe = true } = {}) {
+  const ph = h('button', { class: 'load', type: 'button', text: 'Load live render', onclick: () => load(stage) });
+  const stage = h('div', { class: 'stage' }, h('span', { class: 'armband', 'aria-label': 'Entry ' + entryNo(run), text: entryNo(run) }), ph);
+  stage._run = run; stage._placeholder = ph;
+  if (observe) io.observe(stage); else queueMicrotask(() => load(stage));
+  return stage;
+}
+
+function facts(run, full) {
+  const rows = [
+    ['Effort', run.effort || 'Not recorded'],
+    ['Prompt', run.prompt_version],
+    ['Date', fmtDate(run.date)],
+  ];
+  if (full) rows.push(
+    ['Model id', run.model.id],
+    ['Provider', run.model.provider],
+    ['Harness', run.harness.name ? run.harness.name + (run.harness.version ? ' ' + run.harness.version : '') : 'Not recorded'],
+    ['First try', run.first_try == null ? 'Not recorded' : run.first_try ? 'Yes' : 'No'],
+    ['Time', run.wall_min == null ? 'Not recorded' : run.wall_min + ' min'],
+    ['Tokens', run.tokens.input == null ? 'Not recorded' : (run.tokens.input + run.tokens.output).toLocaleString()],
+    ['Cost', run.cost_usd == null ? 'Not recorded' : '$' + run.cost_usd.toFixed(2)],
+    ['Three.js', run.three_version || 'Not recorded'],
+    ['Score', run.scores ? Object.values(run.scores).reduce((a, b) => a + b, 0) + ' / 40' : 'Not scored yet'],
+    ['File hash', run.sha256],
+  );
+  return h('dl', { class: 'facts' }, rows.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })]));
+}
+
+/* ---------- views ---------- */
+function viewStrip() {
+  const shown = runs.filter(r => state.version === 'all' || r.prompt_version === state.version);
+  $('#hint').hidden = false;
+  if (!shown.length) return h('p', { class: 'empty', text: 'No entries for this prompt version yet.' });
+  return h('div', { class: 'strip', tabindex: 0, 'aria-label': 'Entries' }, shown.map(run =>
+    h('figure', { class: 'entry' },
+      stageFor(run),
+      h('figcaption', { class: 'caption' },
+        h('h2', {}, h('a', { href: '?run=' + encodeURIComponent(run.id), text: run.model.name })),
+        facts(run),
+        h('div', { class: 'actions' },
+          h('label', {}, h('input', {
+            type: 'checkbox', checked: state.picked.has(run.id),
+            onchange: e => { e.target.checked ? state.picked.add(run.id) : state.picked.delete(run.id); tray(); },
+          }), 'Compare'),
+          h('a', { href: '?run=' + encodeURIComponent(run.id), text: 'Details' }),
+        ),
+      ),
+    )));
+}
+
+function viewCompare() {
+  $('#hint').hidden = true;
+  const chosen = state.compare.map(id => runs.find(r => r.id === id)).filter(Boolean);
+  const others = runs.filter(r => !chosen.includes(r));
+  const add = chosen.length < MAX_COMPARE && others.length ? h('figure', { class: 'entry' },
+    h('div', { class: 'stage', style: 'display:grid;place-items:center' },
+      h('label', { style: 'display:grid;gap:8px;color:#5b5146;font-weight:700;text-align:center' }, 'Add an entry',
+        h('select', {
+          style: 'color:#1c2538;padding:6px 10px;border-radius:8px', onchange: e => {
+            if (!e.target.value) return;
+            state.compare.push(e.target.value); route();
+          },
+        }, h('option', { value: '', text: 'Choose…' }), others.map(r => h('option', { value: r.id, text: `No. ${entryNo(r)}, ${r.model.name} (${r.prompt_version})` }))))),
+  ) : null;
+  const mixed = new Set(chosen.map(r => r.prompt_version)).size > 1;
+  return h('div', {},
+    mixed ? h('p', { class: 'empty', style: 'padding:0 24px 8px;margin:0', text: 'These entries answered different prompt versions, so they aren’t a like-for-like comparison.' }) : null,
+    h('div', { class: 'strip grid' },
+      chosen.map(run => h('figure', { class: 'entry' },
+        stageFor(run, { observe: false }),
+        h('figcaption', { class: 'caption' },
+          h('h2', {}, h('a', { href: '?run=' + encodeURIComponent(run.id), text: run.model.name })),
+          facts(run),
+          h('div', { class: 'actions' }, h('button', {
+            class: 'remove', type: 'button', text: 'Remove',
+            onclick: () => { state.compare = state.compare.filter(id => id !== run.id); route(); },
+          })),
+        ))),
+      add,
+    ),
+    h('div', { class: 'controls' }, h('a', { href: './', text: 'All entries' })),
+  );
+}
+
+function viewRun() {
+  $('#hint').hidden = true;
+  const run = runs.find(r => r.id === state.run);
+  if (!run) return h('p', { class: 'empty' }, 'There’s no entry called “', state.run, '”. ', h('a', { href: './', text: 'See all entries' }), '.');
+  document.title = run.model.name + ' on Corgi Tush Bench';
+  return h('section', { class: 'run' },
+    h('div', {}, stageFor(run, { observe: false })),
+    h('div', { class: 'details' },
+      h('h2', { text: run.model.name }),
+      h('div', { style: 'color:var(--muted)', text: 'Entry ' + entryNo(run) }),
+      facts(run, true),
+      run.notes ? h('p', { class: 'notes', text: run.notes }) : null,
+      h('div', { class: 'actions' },
+        // Cross-origin links can't use the download attribute, so production serves a copy with Content-Disposition: attachment.
+        h('a', RUNS_ORIGIN
+          ? { href: RUNS_ORIGIN + run.file.replace(/index\.html$/, 'download.html'), text: 'Download HTML' }
+          : { href: run.file, download: run.id + '.html', text: 'Download HTML' }),
+        h('button', { class: 'remove', type: 'button', style: 'color:var(--ink)', text: 'Read prompt ' + run.prompt_version, onclick: () => openPrompt(run.prompt_version) }),
+        h('a', { href: '?compare=' + encodeURIComponent(run.id), text: 'Compare with others' }),
+        h('a', { href: './', text: 'All entries' }),
+      ),
+    ),
+  );
+}
+
+/* ---------- voting ---------- */
+const NO_API = 'Voting and the leaderboard run on the site\u2019s server functions, so they work on the deployed site or under ' +
+  '\u201cnpx wrangler pages dev\u201d, not with python3 -m http.server.';
+const coatName = id => (COATS.find(c => c[0] === id) || [, id])[1];
+
+async function api(path, opts) {
+  let r;
+  try { r = await fetch(path, opts); } catch { throw Object.assign(new Error(NO_API), { status: 0 }); }
+  const data = await r.json().catch(() => null);
+  if (!data) throw Object.assign(new Error(NO_API), { status: r.status });
+  if (!r.ok) throw Object.assign(new Error(data.error || 'Something went wrong (' + r.status + ').'), { status: r.status });
+  return data;
+}
+
+function anonStage(side, label, coat, seed) {
+  const run = { ...side, model: { name: label + ' entry' } };
+  const ph = h('button', { class: 'load', type: 'button', text: 'Load live render', onclick: () => load(stage) });
+  const stage = h('div', { class: 'stage' }, ph);
+  Object.assign(stage, { _run: run, _placeholder: ph, _coat: coat, _seed: seed });
+  queueMicrotask(() => load(stage));
+  return stage;
+}
+
+async function viewVote() {
+  $('#hint').hidden = true;
+  let m;
+  try { m = await api('/api/match' + (state.version !== 'all' ? '?v=' + encodeURIComponent(state.version) : '')); }
+  catch (e) { return h('p', { class: 'empty', text: e.message }); }
+
+  const names = { left: h('h3', { class: 'side', text: 'Left' }), right: h('h3', { class: 'side', text: 'Right' }) };
+  const pane = side => h('figure', { class: 'entry' },
+    anonStage(m[side], side === 'left' ? 'Left' : 'Right', m.coat, m.seed),
+    h('figcaption', { class: 'caption' }, names[side]));
+  const status = h('p', { class: 'status', role: 'status', text: 'Voting opens in a few seconds. Walk around both first.' });
+  const buttons = [['left', 'Left wins'], ['tie', 'Tie'], ['right', 'Right wins']].map(([choice, text]) =>
+    h('button', { class: choice === 'tie' ? 'btn quiet' : 'btn', type: 'button', disabled: true, text, onclick: () => cast(choice) }));
+  const next = h('button', { class: 'btn', type: 'button', hidden: true, text: 'Next pair', onclick: () => route() });
+  const board = h('a', { href: '?board', hidden: true, text: 'Leaderboard' });
+  setTimeout(() => { if (!next.hidden) return; buttons.forEach(b => (b.disabled = false)); status.textContent = ''; }, 5200);
+
+  async function cast(choice) {
+    buttons.forEach(b => (b.disabled = true));
+    status.textContent = 'Saving your vote\u2026';
+    try {
+      const r = await api('/api/vote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: m.token, choice }) });
+      for (const side of ['left', 'right']) {
+        names[side].replaceChildren(h('a', { href: '?run=' + encodeURIComponent(r[side].id), text: r[side].name }));
+        names[side].classList.add('revealed');
+      }
+      buttons.forEach(b => (b.hidden = true));
+      next.hidden = false; board.hidden = false;
+      status.textContent = choice === 'tie' ? 'Saved as a tie.' : 'Saved. You picked ' + r[choice].name + '.';
+      next.focus();
+    } catch (e) {
+      status.textContent = e.message;
+      if (e.status === 429 && /few seconds/.test(e.message)) buttons.forEach(b => (b.disabled = false));
+      else { next.hidden = false; }
+    }
+  }
+
+  return h('section', { class: 'vote' },
+    h('div', { class: 'vote-head' },
+      h('h2', { text: 'Which corgi wiggles better?' }),
+      h('p', { text: `Drag to walk around each one and click to make it wiggle. Both wear the ${coatName(m.coat).toLowerCase()} coat. Names stay hidden until you vote. Prompt ${m.prompt_version}.` })),
+    h('div', { class: 'strip grid' }, pane('left'), pane('right')),
+    h('div', { class: 'vote-bar' }, buttons, next, board, status));
+}
+
+async function viewBoard() {
+  $('#hint').hidden = true;
+  let d;
+  try { d = await api('/api/leaderboard' + (state.version !== 'all' ? '?v=' + encodeURIComponent(state.version) : '')); }
+  catch (e) { return h('p', { class: 'empty', text: e.message }); }
+  if (!d.v) return h('section', { class: 'board' }, h('h2', { text: 'Leaderboard' }),
+    h('p', { class: 'sub', text: 'There aren\u2019t two entries on the same prompt yet, so nothing has been rated.' }));
+
+  const versions = d.versions.length > 1 ? h('div', { class: 'controls' }, h('div', { class: 'group', role: 'group', 'aria-label': 'Prompt version' },
+    h('span', { text: 'Prompt' }),
+    d.versions.map(v => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(v === d.v), text: v,
+      onclick: () => { state.version = v; route(); } })))) : null;
+  return h('section', { class: 'board' },
+    h('h2', { text: 'Leaderboard' }),
+    h('p', { class: 'sub', text: `${d.total_votes.toLocaleString()} ${d.total_votes === 1 ? 'vote' : 'votes'} on prompt ${d.v}. ` +
+      `Ratings come from blind head-to-head votes, using Elo starting at 1000. Ratings with fewer than ${d.provisional_games} games are provisional.` }),
+    versions,
+    h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Rank', 'Entry', 'Rating', 'Won', 'Lost', 'Tied'].map((t, i) => h('th', { class: i > 1 ? 'num' : null, scope: 'col', text: t })))),
+      h('tbody', {}, d.rows.map((r, i) => h('tr', {},
+        h('td', { class: 'rank', text: i + 1 }),
+        h('td', { class: 'name' }, h('a', { href: '?run=' + encodeURIComponent(r.id), text: r.name }), r.effort ? h('span', { class: 'prov', text: r.effort }) : null),
+        h('td', { class: 'num' }, String(r.rating), r.provisional ? h('span', { class: 'prov', text: 'provisional' }) : null),
+        h('td', { class: 'num', text: r.wins }), h('td', { class: 'num', text: r.losses }), h('td', { class: 'num', text: r.ties }))))))
+    ,
+    h('div', { class: 'after' }, h('a', { class: 'btn', href: '?vote', style: 'text-decoration:none', text: 'Vote on a pair' }), h('a', { href: './', text: 'All entries' })));
+}
+
+function tray() {
+  const n = state.picked.size;
+  $('#tray').classList.toggle('on', n > 0 && !state.run && !state.compare.length && !state.mode);
+  $('#tray-count').textContent = n === 1 ? '1 entry picked, pick at least one more' : `${n} entries picked` + (n > MAX_COMPARE ? `, compare shows up to ${MAX_COMPARE}` : '');
+  $('#tray-go').disabled = n < 2 || n > MAX_COMPARE;
+}
+
+function controls() {
+  const coats = $('.group[aria-label=Coat]');
+  coats.hidden = Boolean(state.mode);
+  coats.querySelectorAll('.chip').forEach(b => b.remove());
+  for (const [id, label] of COATS) coats.append(h('button', {
+    class: 'chip', type: 'button', 'aria-pressed': String(state.coat === id), text: label,
+    onclick: () => { state.coat = id; controls(); syncUrl(); reloadLive(); },
+  }));
+  const vs = $('#versions');
+  vs.replaceChildren();
+  const used = [...new Set(runs.map(r => r.prompt_version))].sort().reverse();
+  if (state.mode || state.run || state.compare.length || used.length < 2) return;
+  vs.append(h('span', { text: 'Prompt' }));
+  for (const v of ['all', ...used]) vs.append(h('button', {
+    class: 'chip', type: 'button', 'aria-pressed': String(state.version === v), text: v === 'all' ? 'All' : v,
+    onclick: () => { state.version = v; route(); },
+  }));
+}
+
+let routeId = 0;
+async function route() {
+  const id = ++routeId;
+  [...live].forEach(s => unload(s));
+  io.disconnect();
+  document.title = state.mode === 'vote' ? 'Vote, Corgi Tush Bench' : state.mode === 'board' ? 'Leaderboard, Corgi Tush Bench' : 'Corgi Tush Bench';
+  const pending = state.mode === 'vote' ? viewVote() : state.mode === 'board' ? viewBoard()
+    : state.run ? viewRun() : state.compare.length ? viewCompare() : viewStrip();
+  if (pending instanceof Promise) $('#main').replaceChildren(h('p', { class: 'empty', text: 'Loading\u2026' }));
+  const view = await pending;
+  if (id !== routeId) return; // a newer navigation won
+  $('#main').replaceChildren(view);
+  controls(); tray(); syncUrl();
+  scrollTo({ top: 0 });
+}
+
+/* ---------- prompt dialog ---------- */
+async function openPrompt(version) {
+  const p = manifest.prompts.find(x => x.version === version) || [...manifest.prompts].reverse().find(x => x.frozen);
+  $('#prompt-title').textContent = 'Prompt ' + p.version + (p.frozen ? '' : ' (draft)');
+  $('#prompt-text').textContent = 'Loading…';
+  $('#prompt-dlg').showModal();
+  try { $('#prompt-text').textContent = await (await fetch(p.file)).text(); }
+  catch { $('#prompt-text').textContent = 'Couldn’t load ' + p.file + '.'; }
+}
+$('#open-prompt').onclick = () => openPrompt(null);
+$('#close-prompt').onclick = () => $('#prompt-dlg').close();
+$('#prompt-dlg').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+$('#copy-prompt').onclick = async e => {
+  try { await navigator.clipboard.writeText($('#prompt-text').textContent); e.target.textContent = 'Copied'; }
+  catch { e.target.textContent = 'Select the text to copy'; }
+  setTimeout(() => (e.target.textContent = 'Copy prompt'), 1800);
+};
+
+$('#tray-go').onclick = () => { state.compare = [...state.picked]; state.picked.clear(); route(); };
+$('#tray-clear').onclick = () => { state.picked.clear(); route(); };
+
+/* ---------- boot ---------- */
+fetch('manifest.json')
+  .then(r => { if (!r.ok) throw 0; return r.json(); })
+  .then(m => { manifest = m; runs = m.runs; route(); })
+  .catch(() => {
+    $('#main').replaceChildren(h('p', { class: 'empty' },
+      'The entry list (manifest.json) didn’t load. Browsers block that for pages opened straight from disk. In Terminal, go to this folder, run ',
+      h('code', { text: 'python3 -m http.server 8000' }), ', then open ',
+      h('a', { href: 'http://localhost:8000/', text: 'localhost:8000' }), '.'));
+  });
+</script>
+</body>
+</html>

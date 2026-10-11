@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#22304a"/>
+  <!-- two rump cheeks over white pants -->
+  <clipPath id="c"><path d="M32 18c-4-6-20-6-21 8-1 9 3 17 7 22h28c4-5 8-13 7-22-1-14-17-14-21-8z"/></clipPath>
+  <g clip-path="url(#c)">
+    <rect width="64" height="64" fill="#d07a33"/>
+    <path d="M8 38c6 3 14 3 20-1 2 4 6 4 8 0 6 4 14 4 20 1v16H8z" fill="#f4f0e8"/>
+  </g>
+</svg>

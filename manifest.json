@@ -1,0 +1,46 @@
+{
+  "$schema": "./manifest.schema.json",
+  "schema_version": 1,
+  "prompts": [
+    { "version": "v0", "file": "prompts/v0.md", "sha256": "d58c6a935627ac5d82403e3261df8375e79877275e34f2952e917e82b2230ff3", "frozen": false },
+    { "version": "v1", "file": "prompts/v1.md", "sha256": "bcbbe7b82a7e488ae3a4186c30e9bfdacfcbe74329dee17774c7d69a7506d546", "frozen": true }
+  ],
+  "runs": [
+    {
+      "id": "opus-5-5-high-20261009",
+      "model": { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "provider": "Anthropic" },
+      "harness": { "name": null, "version": null },
+      "effort": "high",
+      "date": "2026-10-09",
+      "prompt_version": "v0",
+      "first_try": null,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/opus-5-5-high-20261009/index.html",
+      "sha256": "d770f6b6a7dbb57a26a61668fc49bea7dd8bdaf969fa6ca9cf4062c94ee15b06",
+      "three_version": "0.170.0",
+      "params": { "seed": false, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v0 run. Adaptive quality: lowers pixel ratio, then shell count, when below 60 fps."
+    },
+    {
+      "id": "sonnet-5-5-20261009",
+      "model": { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "provider": "Anthropic" },
+      "harness": { "name": null, "version": null },
+      "effort": null,
+      "date": "2026-10-09",
+      "prompt_version": "v0",
+      "first_try": null,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/sonnet-5-5-20261009/index.html",
+      "sha256": "6bdadeaf9ebf53b1ac0174214b5446cbe4960973f31a8e044633830969662e84",
+      "three_version": "0.160.0",
+      "params": { "seed": false, "coat": { "red": "rw", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v0 run. Black-headed tricolor renders the same as tricolor (mask multiplied by 0, line 275)."
+    }
+  ]
+}

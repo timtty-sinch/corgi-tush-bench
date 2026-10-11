@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contribute a run, Corgi Tush Bench</title>
+<meta name="description" content="One prompt, many models: every AI builds a wiggly 3D corgi rump in a single HTML file. Watch them live and compare side by side.">
+<meta property="og:title" content="Corgi Tush Bench">
+<meta property="og:description" content="One prompt, many models: every AI builds a wiggly 3D corgi rump in a single HTML file.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#22304a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ring:#22304a;      /* show-ring navy: page */
+    --ring-2:#2d3e5e;    /* raised surfaces */
+    --line:#3d5078;
+    --ink:#f4f0e8;
+    --muted:#b3bccd;
+    --gold:#f2b632;      /* rosette gold: focus, selection */
+    --pane:#e9e3da;      /* matches the renders' own backdrop */
+    --band:#fbfaf6; --band-ink:#1c2538;
+    --display:'Bricolage Grotesque',system-ui,sans-serif;
+    --body:'Atkinson Hyperlegible',system-ui,sans-serif;
+    --pane-w:min(400px, calc(100vw - 32px));
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--ring);color:var(--ink);font:16px/1.5 var(--body)}
+  a{color:var(--ink);text-underline-offset:3px}
+  a:hover{color:var(--gold)}
+  :focus-visible{outline:3px solid var(--gold);outline-offset:3px;border-radius:4px}
+  button,select{font:inherit;color:inherit}
+
+  /* Masthead */
+  .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px;padding:28px 24px 8px;max-width:1720px;margin:0 auto}
+  .brand{margin:0;font:800 clamp(40px,7vw,84px)/.9 var(--display);letter-spacing:-.035em}
+  .brand a{text-decoration:none}
+  .lede{margin:12px 0 0;max-width:56ch;color:var(--muted)}
+  nav.links{display:flex;gap:20px;padding-bottom:6px}
+  nav.links a,nav.links button{background:none;border:0;padding:0;cursor:pointer;font-weight:700;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:5px}
+  nav.links a:hover,nav.links button:hover{color:var(--gold);text-decoration-color:var(--gold)}
+
+  /* Controls */
+  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:16px 24px;max-width:1720px;margin:0 auto}
+  .group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .group > span{color:var(--muted);margin-right:4px}
+  .chip{background:transparent;border:1.5px solid var(--line);border-radius:999px;padding:5px 13px;cursor:pointer}
+  .chip:hover{border-color:var(--muted)}
+  .chip[aria-pressed=true]{background:var(--gold);border-color:var(--gold);color:var(--band-ink);font-weight:700}
+  .hint{color:var(--muted);font-size:14px;margin-left:auto}
+
+  /* Strip of entries */
+  .strip{display:flex;gap:24px;overflow-x:auto;scroll-snap-type:x mandatory;padding:12px 24px 28px;scroll-padding:0 24px}
+  .strip.grid{flex-wrap:wrap;justify-content:center;overflow:visible}
+  .entry{flex:0 0 var(--pane-w);scroll-snap-align:start;margin:0}
+  .stage{position:relative;width:var(--pane-w);aspect-ratio:1;border-radius:16px;overflow:hidden;background:var(--pane)}
+  .stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+  .stage .load{position:absolute;inset:0;display:grid;place-items:center;width:100%;border:0;background:var(--pane);color:#5b5146;cursor:pointer;font-weight:700}
+  .stage .load:hover{color:#2b241d}
+  .armband{position:absolute;top:12px;left:12px;z-index:2;background:var(--band);color:var(--band-ink);border-radius:4px;padding:2px 10px 3px;font:800 22px/1.1 var(--display);letter-spacing:-.02em;box-shadow:0 1px 0 rgba(28,37,56,.25);pointer-events:none}
+  .caption{padding:12px 2px 0}
+  .caption h2{margin:0;font:800 22px/1.15 var(--display);letter-spacing:-.015em}
+  .caption h2 a{text-decoration:none}
+  .facts{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:8px 0 0;font-size:14px}
+  .facts dt{color:var(--muted)}
+  .facts dd{margin:0}
+  .actions{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:10px;font-size:14px}
+  .actions label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .actions input{accent-color:var(--gold);width:16px;height:16px}
+  .actions .remove{background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;color:var(--muted)}
+
+  /* Compare tray */
+  .tray{position:sticky;bottom:0;display:none;align-items:center;justify-content:center;gap:16px;padding:12px 16px;background:var(--ring-2);border-top:1px solid var(--line)}
+  .tray.on{display:flex}
+  .btn{background:var(--gold);color:var(--band-ink);border:0;border-radius:999px;padding:8px 18px;font-weight:700;cursor:pointer}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .btn.quiet{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+
+  /* Single run */
+  .run{display:flex;flex-wrap:wrap;gap:32px;padding:12px 24px 40px;max-width:1100px;margin:0 auto}
+  .run .details{flex:1 1 320px;min-width:0}
+  .run h2{margin:0 0 4px;font:800 clamp(28px,4vw,44px)/1.05 var(--display);letter-spacing:-.025em}
+  .run .facts{font-size:15px;gap:6px 18px;margin-top:18px}
+  .run .facts dd{overflow-wrap:anywhere}
+  .run .notes{margin:18px 0 0;color:var(--muted);max-width:60ch}
+  .run .actions{margin-top:22px;font-size:15px}
+
+  .empty{padding:40px 24px;color:var(--muted);max-width:60ch;margin:0 auto}
+  .empty code{color:var(--ink)}
+
+  footer{padding:24px;color:var(--muted);font-size:14px;max-width:1720px;margin:0 auto;border-top:1px solid var(--line)}
+  footer a{color:var(--muted)}
+
+  /* Prompt dialog */
+  dialog{width:min(760px,calc(100vw - 32px));max-height:min(80vh,900px);padding:0;border:0;border-radius:16px;background:var(--ring-2);color:var(--ink)}
+  dialog::backdrop{background:rgba(12,18,30,.7)}
+  .dlg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--ring-2)}
+  .dlg-head h2{margin:0;font:800 22px/1.2 var(--display)}
+  .dlg-head .group{gap:8px}
+  dialog pre{margin:0;padding:20px;white-space:pre-wrap;font:14px/1.6 var(--body);max-width:80ch}
+</style>
+<style>
+  .doc{max-width:68ch;padding:8px 24px 48px;margin:0 auto 0 0}
+  .wrap{max-width:1720px;margin:0 auto}
+  .doc h2{font:800 28px/1.15 var(--display);letter-spacing:-.02em;margin:36px 0 8px}
+  .doc ol{padding-left:1.4em}
+  .doc li{margin:0 0 14px}
+  .doc code{background:var(--ring-2);padding:1px 6px;border-radius:4px;font-size:.92em;overflow-wrap:anywhere}
+  .doc pre{background:var(--ring-2);padding:14px 16px;border-radius:10px;overflow-x:auto;font-size:14px}
+  .doc p{margin:0 0 14px}
+  .doc .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div>
+    <p class="brand" style="font-size:clamp(32px,5vw,56px)"><a href="./">Corgi Tush Bench</a></p>
+    <h1 style="margin:10px 0 0;font:800 clamp(26px,3.5vw,38px)/1.1 var(--display)">Contribute a run</h1>
+  </div>
+  <nav class="links"><a href="./">All entries</a><a href="prompts/v1.md">Prompt v1</a></nav>
+</header>
+<main class="doc">
+  <p>Anyone can add a model. A run only counts if the model gets the exact prompt, works on its own, and the file it delivers goes up unedited.</p>
+
+  <h2>Run the model</h2>
+  <ol>
+    <li>Start your agent harness in a <strong>new, empty folder</strong>. Don't run it inside this repo: the prompt tells the model not to look at other files, and other entries must not be within reach.</li>
+    <li>Paste <a href="prompts/v1.md">prompts/v1.md</a> exactly as written. Don't add hints, fix typos or change the wording.</li>
+    <li>Let it work for up to 2 hours, or 3 if the model asks for more time. Stop at 3 hours and take whatever file exists.</li>
+    <li>Note the exact model id, the harness and its version, the effort or thinking setting, the time it took, and the tokens and cost if your harness reports them.</li>
+  </ol>
+
+  <h2>Submit it</h2>
+  <ol>
+    <li>Name the run <code>&lt;model&gt;-&lt;effort&gt;-&lt;yyyymmdd&gt;</code>, for example <code>opus-5-5-high-20261009</code>. Leave out the effort if you don't know it. Add <code>-b</code>, <code>-c</code> for more runs on the same day.</li>
+    <li>Put the delivered file at <code>runs/&lt;id&gt;/index.html</code>. Only move or rename it, never edit it.</li>
+    <li>Get its hash:
+<pre>shasum -a 256 runs/&lt;id&gt;/index.html</pre></li>
+    <li>Add an entry to <a href="manifest.json">manifest.json</a> following <a href="manifest.schema.json">manifest.schema.json</a>. Write <code>null</code> for anything you didn't record. Don't estimate. For a v1 run, set:
+<pre>"params": {
+  "seed": true,
+  "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" }
+}</pre></li>
+    <li>Open a pull request with the file and the manifest change.</li>
+  </ol>
+
+  <h2>What happens next</h2>
+  <p>If the file fails to load or throws errors, it stays listed with <code>first_try: false</code>. Failures are results too. A second attempt is a new entry, not a replacement.</p>
+  <p class="muted">Full runner rules are in <a href="prompts/RULES.md">prompts/RULES.md</a>.</p>
+</main>
+</div>
+</body>
+</html>
