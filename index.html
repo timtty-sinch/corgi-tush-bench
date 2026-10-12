@@ -187,7 +187,7 @@
 </dialog>
 
 <script>
-/* Where run files are served from. build.sh fills this in for production with a separate
+/* Where run files are served from. The deploy fills this in for production with a separate
    origin, so model-written code never shares the site's origin. Locally it stays same-folder. */
 const RUNS_ORIGIN = '__RUNS_ORIGIN__'.startsWith('__') ? '' : '__RUNS_ORIGIN__';
 const MAX_LIVE = 4;
@@ -388,8 +388,8 @@ function viewRun() {
 }
 
 /* ---------- voting ---------- */
-const NO_API = 'Voting and the leaderboard run on the site\u2019s server functions, so they work on the deployed site or under ' +
-  '\u201cnpx wrangler pages dev\u201d, not with python3 -m http.server.';
+const NO_API = 'Voting and the leaderboard need the site\u2019s server, so they only work on the live site, ' +
+  'not in a local preview.';
 const coatName = id => (COATS.find(c => c[0] === id) || [, id])[1];
 
 async function api(path, opts) {

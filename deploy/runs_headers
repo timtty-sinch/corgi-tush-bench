@@ -1,9 +1,0 @@
-# Run files are untrusted model output. They may only load Three.js from the two allowed CDNs
-# (the prompt's own rule), and may only be framed by the site.
-/runs/*
-  Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data: blob:; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; worker-src blob:; frame-ancestors __SITE_ORIGIN__ http://localhost:8000
-  X-Content-Type-Options: nosniff
-  Cache-Control: public, max-age=3600
-
-/runs/:id/download.html
-  Content-Disposition: attachment
