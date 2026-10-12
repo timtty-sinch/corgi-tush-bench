@@ -41,6 +41,24 @@
       "params": { "seed": false, "coat": { "red": "rw", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v0 run. Black-headed tricolor renders the same as tricolor (mask multiplied by 0, line 275)."
+    },
+    {
+      "id": "opus-5-20261012",
+      "model": { "id": "claude-opus-5", "name": "Claude Opus 5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.296" },
+      "effort": null,
+      "date": "2026-10-12",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": 131,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/opus-5-20261012/index.html",
+      "sha256": "7d7c78c3154e815eae7ad5bbe94cd6e7e6b99a1332c951bef5a3afcc849456ee",
+      "three_version": "0.169.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "First v1 run. Rule 1 deviation: the harness was started in the repo root instead of an empty folder, so directory listings showed runs/ and the two v0 entries' filenames; their contents were never opened. The run was interrupted by a power outage and resumed in a fresh folder from the session transcript; wall_min is model working time and excludes the 18-minute gap. Has an adaptive quality fallback (pixel ratio, then shell count) but it only engages above 29 ms/frame, so it does not trigger at 400x400 DPR 2."
     }
   ]
 }
