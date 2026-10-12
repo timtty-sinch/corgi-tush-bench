@@ -59,6 +59,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "First v1 run. Rule 1 deviation: the harness was started in the repo root instead of an empty folder, so directory listings showed runs/ and the two v0 entries' filenames; their contents were never opened. The run was interrupted by a power outage and resumed in a fresh folder from the session transcript; wall_min is model working time and excludes the 18-minute gap. Has an adaptive quality fallback (pixel ratio, then shell count) but it only engages above 29 ms/frame, so it does not trigger at 400x400 DPR 2."
+    },
+    {
+      "id": "haiku-5-5-high-20261012",
+      "model": { "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.296" },
+      "effort": "high",
+      "date": "2026-10-12",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/haiku-5-5-high-20261012/index.html",
+      "sha256": "9d181c386eb41d62cd0634fbf40db3a0bd2177de0456574f53344b008920eb85",
+      "three_version": "0.160.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run. Effort label taken from the run folder name (haiku-5.5-high). Harness started in its own working folder; no other files were read. Checked in headless Chrome at 400x400 DPR 2 from file://: loads with no console errors; back, side, low and high views and click wiggles were viewed. Wall time, tokens and cost were not recorded."
     }
   ]
 }
