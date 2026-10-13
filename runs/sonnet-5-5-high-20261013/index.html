@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#cfd8dd}
+canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;outline:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+canvas.drag{cursor:grabbing}
+canvas.hit{cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c" role="img" aria-label="Corgi"></canvas>
+<script>
+(function () {
+'use strict';
+
+/* ======================================================================
+   Procedural Pembroke Welsh Corgi (rear half), WebGL2, shell fur.
+   Units: 1 unit = 10 cm.  The dog faces -Z, its rump points to +Z, +Y is up.
+   ====================================================================== */
+
+var TAU = Math.PI * 2;
+var COATS = ['red', 'sable', 'tri', 'bht'];
+
+/* ---------------------------------------------------------------- RNG */
+function mix32(x) {
+  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b);
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+  return (x ^ (x >>> 16)) >>> 0;
+}
+// One generator (sfc32) seeded from the single page seed; independent streams
+// are derived from that seed so that e.g. the wiggle sequence never depends on
+// frame timing.
+function makeStream(lo, hi, id) {
+  var a = mix32(lo ^ Math.imul(id + 1, 0x9e3779b9));
+  var b = mix32(hi + Math.imul(id, 0x632be5ab) + 0x1234567);
+  var c = mix32(a ^ b ^ 0xdeadbeef);
+  var d = 1;
+  function next() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+    var t = (a + b) | 0; t = (t + d) | 0;
+    d = (d + 1) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  }
+  for (var i = 0; i < 16; i++) next();
+  return next;
+}
+
+/* ------------------------------------------------------ URL hash params */
+function readHash() {
+  var out = { seed: null, coat: null };
+  var h = (location.hash || '').replace(/^#/, '');
+  if (!h) return out;
+  var parts = h.split('&');
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i], k = p.indexOf('=');
+    if (k < 0) continue;
+    var key = p.slice(0, k), val = p.slice(k + 1);
+    if (key === 'seed' && /^[0-9]+$/.test(val)) out.seed = val;
+    else if (key === 'coat' && COATS.indexOf(val) >= 0) out.coat = val;
+  }
+  return out;
+}
+function seedParts(str) {
+  var lo, hi;
+  try {
+    var n = BigInt(str);
+    lo = Number(n & 0xffffffffn);
+    hi = Number((n >> 32n) & 0xffffffffn);
+    var rest = n >> 64n;
+    while (rest > 0n) { hi = mix32(hi ^ Number(rest & 0xffffffffn)); rest >>= 32n; }
+  } catch (e) { lo = 12345; hi = 6789; }
+  return [lo >>> 0, hi >>> 0];
+}
+function freshSeed() {
+  try {
+    var a = new Uint32Array(1);
+    crypto.getRandomValues(a);
+    return String(a[0]);
+  } catch (e) {
+    return String((Date.now() ^ Math.floor(performance.now() * 1000)) >>> 0);
+  }
+}
+
+/* ------------------------------------------------------------ math utils */
+function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function sstep(a, b, x) { var t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+
+function hash3(ix, iy, iz, s) {
+  var h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(iz, 1274126177) + Math.imul(s, 2246822519)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function vnoise(x, y, z, s) {
+  var ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  var fx = x - ix, fy = y - iy, fz = z - iz;
+  fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
+  var a = lerp(lerp(hash3(ix, iy, iz, s), hash3(ix + 1, iy, iz, s), fx), lerp(hash3(ix, iy + 1, iz, s), hash3(ix + 1, iy + 1, iz, s), fx), fy);
+  var b = lerp(lerp(hash3(ix, iy, iz + 1, s), hash3(ix + 1, iy, iz + 1, s), fx), lerp(hash3(ix, iy + 1, iz + 1, s), hash3(ix + 1, iy + 1, iz + 1, s), fx), fy);
+  return lerp(a, b, fz);
+}
+function fbm(x, y, z, s) {
+  return 0.55 * vnoise(x, y, z, s) + 0.28 * vnoise(x * 2.1, y * 2.1, z * 2.1, s + 11) + 0.17 * vnoise(x * 4.3, y * 4.3, z * 4.3, s + 23);
+}
+
+function m4mul(a, b) {
+  var o = new Float32Array(16);
+  for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) {
+    o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  }
+  return o;
+}
+function m4persp(fovy, asp, n, f) {
+  var t = 1 / Math.tan(fovy / 2), o = new Float32Array(16);
+  o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f);
+  return o;
+}
+function m4look(e, t) {
+  var zx = e[0] - t[0], zy = e[1] - t[1], zz = e[2] - t[2];
+  var zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+  var xx = zz, xy = 0, xz = -zx; // up x z, up = (0,1,0)
+  var xl = Math.hypot(xx, xz); xx /= xl; xz /= xl;
+  var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  var o = new Float32Array(16);
+  o[0] = xx; o[1] = yx; o[2] = zx;
+  o[4] = xy; o[5] = yy; o[6] = zy;
+  o[8] = xz; o[9] = yz; o[10] = zz;
+  o[12] = -(xx * e[0] + xy * e[1] + xz * e[2]);
+  o[13] = -(yx * e[0] + yy * e[1] + yz * e[2]);
+  o[14] = -(zx * e[0] + zy * e[1] + zz * e[2]);
+  o[15] = 1;
+  return { m: o, right: [xx, xy, xz], up: [yx, yy, yz], fwd: [-zx, -zy, -zz] };
+}
+function mat3mul(a, b) { // row-major 3x3
+  var o = new Array(9);
+  for (var r = 0; r < 3; r++) for (var c = 0; c < 3; c++)
+    o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+  return o;
+}
+function rotYm(a) { var c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
+function rotZm(a) { var c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, s, c, 0, 0, 0, 1]; }
+function rotXm(a) { var c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }
+
+/* ----------------------------------------------------------------- SDF */
+function smin(a, b, k) { var h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+function ell(px, py, pz, cx, cy, cz, rx, ry, rz) {
+  var x = (px - cx) / rx, y = (py - cy) / ry, z = (pz - cz) / rz;
+  var k0 = Math.sqrt(x * x + y * y + z * z);
+  var k1 = Math.sqrt(x * x / (rx * rx) + y * y / (ry * ry) + z * z / (rz * rz));
+  return k1 < 1e-6 ? -Math.min(rx, ry, rz) : k0 * (k0 - 1) / k1;
+}
+function rcone(px, py, pz, ax, ay, az, bx, by, bz, r1, r2) {
+  var bax = bx - ax, bay = by - ay, baz = bz - az;
+  var l2 = bax * bax + bay * bay + baz * baz, rr = r1 - r2, a2 = l2 - rr * rr, il2 = 1 / l2;
+  var pax = px - ax, pay = py - ay, paz = pz - az;
+  var y = pax * bax + pay * bay + paz * baz, z = y - l2;
+  var vx = pax * l2 - bax * y, vy = pay * l2 - bay * y, vz = paz * l2 - baz * y;
+  var x2 = vx * vx + vy * vy + vz * vz, y2 = y * y * l2, z2 = z * z * l2;
+  var k = Math.sign(rr) * rr * rr * x2;
+  if (Math.sign(z) * a2 * z2 > k) return Math.sqrt(x2 + z2) * il2 - r2;
+  if (Math.sign(y) * a2 * y2 < k) return Math.sqrt(x2 + y2) * il2 - r1;
+  return (Math.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
+}
+
+var TAILD = [0, 2.0, 0.36, 0, 2.12, 0.84, 0.17, 0.10];
+function dTailPrim(x, y, z) {
+  return rcone(x, y, z, TAILD[0], TAILD[1], TAILD[2], TAILD[3], TAILD[4], TAILD[5], TAILD[6], TAILD[7]);
+}
+function sdf(x, y, z) {
+  var ax = x < 0 ? -x : x;
+  var trunk = smin(rcone(x, y, z, 0, 1.78, -2.3, 0, 1.78, -0.9, 0.74, 0.78), rcone(x, y, z, 0, 1.78, -4.3, 0, 1.78, -2.3, 0.10, 0.74), 0.3);
+  var croup = ell(x, y, z, 0, 1.85, -0.3, 0.50, 0.46, 0.92);
+  var lobeL = ell(x, y, z, -0.52, 1.74, 0.0, 0.58, 0.76, 0.78);
+  var lobeR = ell(x, y, z, 0.52, 1.74, 0.0, 0.58, 0.76, 0.78);
+  var d = smin(lobeL, lobeR, 0.22);
+  d = smin(d, croup, 0.28);
+  d = smin(d, trunk, 0.5);
+  var thigh = ell(ax, y, z, 0.58, 1.26, 0.08, 0.46, 0.60, 0.58);
+  d = smin(d, thigh, 0.35);
+  // the left leg stands a little further forward and out (natural asymmetry)
+  var lz = x < 0 ? z + 0.13 : z, lx = x < 0 ? ax - 0.04 : ax;
+  var tibia = rcone(lx, y, lz, 0.56, 1.18, -0.28, 0.58, 0.74, 0.48, 0.30, 0.20);
+  d = smin(d, tibia, 0.2);
+  if (y < 1.3) {
+    var hock = ell(lx, y, lz, 0.58, 0.76, 0.52, 0.21, 0.23, 0.22);
+    d = smin(d, hock, 0.12);
+    var meta = rcone(lx, y, lz, 0.58, 0.74, 0.46, 0.58, 0.17, 0.32, 0.18, 0.16);
+    d = smin(d, meta, 0.10);
+    var paw = ell(lx, y, lz, 0.58, 0.12, 0.0, 0.23, 0.17, 0.43);
+    d = smin(d, paw, 0.09);
+    if (lz < 0.0 && y < 0.5 && lx > 0.28 && lx < 0.95) {
+      var t = ell(lx, y, lz, 0.58 - 0.13, 0.085, -0.36, 0.062, 0.075, 0.11);
+      t = smin(t, ell(lx, y, lz, 0.58 - 0.047, 0.085, -0.41, 0.062, 0.075, 0.11), 0.015);
+      t = smin(t, ell(lx, y, lz, 0.58 + 0.047, 0.085, -0.41, 0.062, 0.075, 0.11), 0.015);
+      t = smin(t, ell(lx, y, lz, 0.58 + 0.13, 0.085, -0.36, 0.062, 0.075, 0.11), 0.015);
+      d = smin(d, t, 0.025);
+    }
+  }
+  if (z > 0.2 && y > 1.7) d = smin(d, dTailPrim(x, y, z), 0.12);
+  return d;
+}
+
+/* ---------------------------------------------- per-vertex static weights */
+var PV = [0, 1.75, -1.6];       // rump pivot (shared with shader)
+var TP = [0, 2.05, 0.5];       // tail pivot
+
+function wRumpAt(x, y, z) { return sstep(-3.0, -0.5, z) * sstep(0.3, 1.5, y); }
+function wPawLAt(x, y, z) { return sstep(0.12, 0.45, -x) * (1 - sstep(0.3, 1.05, y)); }
+function wPawRAt(x, y, z) { return sstep(0.12, 0.45, x) * (1 - sstep(0.3, 1.05, y)); }
+function wTailAt(x, y, z) {
+  if (z < 0.2 || y < 1.6) return 0;
+  var d = dTailPrim(x, y, z);
+  var w = clamp(1 - d / 0.22, 0, 1);
+  return w * w * sstep(0.35, 0.65, z);
+}
+function pantsAt(x, y, z) {
+  return sstep(-0.3, 0.35, z) * (1 - sstep(1.45, 2.0, y)) * sstep(0.0, 0.35, Math.abs(x)) * sstep(0.62, 1.05, y);
+}
+function furLenAt(x, y, z, nx, ny, nz, noise) {
+  var L = 0.31;
+  var belly = (1 - sstep(1.2, 1.7, y)) * (1 - sstep(0.0, 0.7, z));
+  L = lerp(L, 0.42, belly * 0.8);
+  L = lerp(L, 0.50, pantsAt(x, y, z));
+  // feathering on the back of the thigh / hock
+  L = lerp(L, 0.66, sstep(0.25, 0.55, z) * sstep(0.2, 0.45, nz) * sstep(0.6, 0.95, y) * (1 - sstep(1.35, 1.7, y)));
+  L = lerp(L, 0.15, 1 - sstep(0.48, 0.8, y));
+  L = lerp(L, 0.08, 1 - sstep(0.15, 0.4, y));
+  L = lerp(L, 0.22, sstep(0.55, 0.9, z) * sstep(1.75, 2.0, y));
+  return L * (0.88 + 0.24 * noise);
+}
+function fluffAt(x, y, z) {
+  var f = 0.25 + 0.35 * sstep(-1.0, 0.4, z);
+  f = lerp(f, 1.0, pantsAt(x, y, z));
+  f = lerp(f, 0.12, 1 - sstep(0.45, 0.85, y));
+  return f;
+}
+
+/* ------------------------------------------------------- mesh extraction */
+function buildMesh(h) {
+  var x0 = -2.1, y0 = -0.12, z0 = -4.5;
+  var nx = Math.ceil(4.2 / h), ny = Math.ceil(3.4 / h), nz = Math.ceil(6.0 / h);
+  var sx = nx + 1, sy = ny + 1, sz = nz + 1;
+  var val = new Float32Array(sx * sy * sz);
+  var B = 4;
+  var cx = Math.floor(nx / B) + 2, cy = Math.floor(ny / B) + 2, cz = Math.floor(nz / B) + 2;
+  var coarse = new Float32Array(cx * cy * cz);
+  var ci, cj, ck;
+  for (ck = 0; ck < cz; ck++) for (cj = 0; cj < cy; cj++) for (ci = 0; ci < cx; ci++)
+    coarse[(ck * cy + cj) * cx + ci] = sdf(x0 + ci * B * h, y0 + cj * B * h, z0 + ck * B * h);
+  var thr = B * h * 1.95;
+  var i, j, k;
+  for (k = 0; k < sz; k++) {
+    var bk = Math.floor(k / B);
+    for (j = 0; j < sy; j++) {
+      var bj = Math.floor(j / B);
+      for (i = 0; i < sx; i++) {
+        var bi = Math.floor(i / B);
+        var m = 1e9, sum = 0;
+        for (var c = 0; c < 8; c++) {
+          var v = coarse[((bk + (c >> 2)) * cy + bj + ((c >> 1) & 1)) * cx + bi + (c & 1)];
+          var av = Math.abs(v); if (av < m) m = av; sum += v;
+        }
+        var idx = (k * sy + j) * sx + i;
+        if (m > thr) val[idx] = sum / 8;
+        else val[idx] = sdf(x0 + i * h, y0 + j * h, z0 + k * h);
+      }
+    }
+  }
+  // naive surface nets
+  var cellIdx = new Int32Array(nx * ny * nz).fill(-1);
+  var pos = [];
+  var cornerOff = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+  var edges = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+  var cv = new Float32Array(8);
+  for (k = 0; k < nz; k++) for (j = 0; j < ny; j++) for (i = 0; i < nx; i++) {
+    var mask = 0;
+    for (var cc = 0; cc < 8; cc++) {
+      var o = cornerOff[cc];
+      cv[cc] = val[((k + o[2]) * sy + j + o[1]) * sx + i + o[0]];
+      if (cv[cc] < 0) mask |= 1 << cc;
+    }
+    if (mask === 0 || mask === 255) continue;
+    var ex = 0, ey = 0, ez = 0, cnt = 0;
+    for (var e = 0; e < 12; e++) {
+      var a = edges[e][0], b = edges[e][1];
+      var va = cv[a], vb = cv[b];
+      if ((va < 0) === (vb < 0)) continue;
+      var t = va / (va - vb);
+      var oa = cornerOff[a], ob = cornerOff[b];
+      ex += oa[0] + (ob[0] - oa[0]) * t; ey += oa[1] + (ob[1] - oa[1]) * t; ez += oa[2] + (ob[2] - oa[2]) * t;
+      cnt++;
+    }
+    cellIdx[(k * ny + j) * nx + i] = pos.length / 3;
+    pos.push(x0 + (i + ex / cnt) * h, y0 + (j + ey / cnt) * h, z0 + (k + ez / cnt) * h);
+  }
+  // quads
+  var quads = [];
+  function cell(i2, j2, k2) { return cellIdx[(k2 * ny + j2) * nx + i2]; }
+  for (k = 1; k < nz; k++) for (j = 1; j < ny; j++) for (i = 1; i < nx; i++) {
+    var v0 = val[(k * sy + j) * sx + i] < 0;
+    if (i < nx && v0 !== (val[(k * sy + j) * sx + i + 1] < 0))
+      quads.push(cell(i, j - 1, k - 1), cell(i, j, k - 1), cell(i, j, k), cell(i, j - 1, k));
+    if (v0 !== (val[(k * sy + j + 1) * sx + i] < 0))
+      quads.push(cell(i - 1, j, k - 1), cell(i, j, k - 1), cell(i, j, k), cell(i - 1, j, k));
+    if (v0 !== (val[((k + 1) * sy + j) * sx + i] < 0))
+      quads.push(cell(i - 1, j - 1, k), cell(i, j - 1, k), cell(i, j, k), cell(i - 1, j, k));
+  }
+  // x-edges at i=0 are skipped (outside the dog anyway)
+  var nv = pos.length / 3;
+  var P = new Float32Array(pos);
+  // project vertices onto the exact surface, then normals
+  var N = new Float32Array(nv * 3);
+  var eps = 0.006;
+  function grad(x, y, z, out) {
+    var gx = sdf(x + eps, y, z) - sdf(x - eps, y, z);
+    var gy = sdf(x, y + eps, z) - sdf(x, y - eps, z);
+    var gz = sdf(x, y, z + eps) - sdf(x, y, z - eps);
+    var l = Math.hypot(gx, gy, gz) || 1;
+    out[0] = gx / l; out[1] = gy / l; out[2] = gz / l;
+  }
+  var g = [0, 0, 0];
+  for (var v = 0; v < nv; v++) {
+    var px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2];
+    for (var it = 0; it < 2; it++) {
+      var d = sdf(px, py, pz);
+      grad(px, py, pz, g);
+      px -= g[0] * d; py -= g[1] * d; pz -= g[2] * d;
+    }
+    grad(px, py, pz, g);
+    P[v * 3] = px; P[v * 3 + 1] = py; P[v * 3 + 2] = pz;
+    N[v * 3] = g[0]; N[v * 3 + 1] = g[1]; N[v * 3 + 2] = g[2];
+  }
+  // triangles with outward winding
+  var idxs = [];
+  function pushTri(a, b, c) {
+    var ux = P[b * 3] - P[a * 3], uy = P[b * 3 + 1] - P[a * 3 + 1], uz = P[b * 3 + 2] - P[a * 3 + 2];
+    var wx = P[c * 3] - P[a * 3], wy = P[c * 3 + 1] - P[a * 3 + 1], wz = P[c * 3 + 2] - P[a * 3 + 2];
+    var fx = uy * wz - uz * wy, fy = uz * wx - ux * wz, fz = ux * wy - uy * wx;
+    var dn = fx * (N[a * 3] + N[b * 3] + N[c * 3]) + fy * (N[a * 3 + 1] + N[b * 3 + 1] + N[c * 3 + 1]) + fz * (N[a * 3 + 2] + N[b * 3 + 2] + N[c * 3 + 2]);
+    if (dn >= 0) idxs.push(a, b, c); else idxs.push(a, c, b);
+  }
+  function dist2(a, b) {
+    var dx = P[a * 3] - P[b * 3], dy = P[a * 3 + 1] - P[b * 3 + 1], dz = P[a * 3 + 2] - P[b * 3 + 2];
+    return dx * dx + dy * dy + dz * dz;
+  }
+  for (var q = 0; q < quads.length; q += 4) {
+    var qa = quads[q], qb = quads[q + 1], qc = quads[q + 2], qd = quads[q + 3];
+    if (qa < 0 || qb < 0 || qc < 0 || qd < 0) continue;
+    if (dist2(qa, qc) < dist2(qb, qd)) { pushTri(qa, qb, qc); pushTri(qa, qc, qd); }
+    else { pushTri(qb, qc, qd); pushTri(qb, qd, qa); }
+  }
+  return { P: P, N: N, idx: new Uint32Array(idxs), nv: nv };
+}
+
+function aoAt(x, y, z, nx, ny, nz) {
+  var occ = 0, sc = 1, tot = 0;
+  for (var i = 1; i <= 5; i++) {
+    var hh = 0.06 + 0.11 * i;
+    var d = sdf(x + nx * hh, y + ny * hh, z + nz * hh);
+    occ += clamp((hh - d) / hh, 0, 1) * sc;
+    tot += sc;
+    sc *= 0.8;
+  }
+  var a = 1 - 0.95 * occ / tot;
+  return clamp(a, 0.05, 1);
+}
+
+/* --------------------------------------------------------- coat / colors */
+function srgb(r, g, b) { return [Math.pow(r, 2.2), Math.pow(g, 2.2), Math.pow(b, 2.2)]; }
+function tint(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
+
+function makeCoat(seedStr, forced) {
+  var sp = seedParts(seedStr);
+  var rs = makeStream(sp[0], sp[1], 1);
+  var coatIdx = Math.floor(rs() * 4);
+  var v = [];
+  for (var i = 0; i < 24; i++) v.push(rs());
+  var coat = forced || COATS[coatIdx];
+  var V = {
+    coat: coat,
+    wBody: 1.30 + 0.34 * v[0],
+    wRump: 1.15 + 0.34 * v[1],
+    chev: -0.22 + 0.62 * v[2],
+    tanBand: 0.34 + 0.22 * v[3],
+    o1: v[4] * 90, o2: v[5] * 90, o3: v[6] * 90,
+    ns: Math.floor(v[7] * 1000),
+    bright: 0.93 + 0.14 * v[8],
+    warm: v[9] - 0.5,
+    tip: v[10],
+    saltA: Math.floor(v[11] * 4294967295) >>> 0,
+    saltB: Math.floor(v[12] * 4294967295) >>> 0,
+    saltC: Math.floor(v[13] * 4294967295) >>> 0
+  };
+  var w = V.warm * 0.06, b = V.bright;
+  V.white = srgb(0.97, 0.935, 0.875);
+  V.dark = srgb(0.075, 0.062, 0.055);
+  if (coat === 'red') {
+    V.base = srgb(clamp(0.70 * b + w, 0, 1), clamp(0.305 * b, 0, 1), 0.095 * b);
+    V.tipc = srgb(0.88 * b, 0.56 * b, 0.27 * b);
+    V.tan = V.base; V.mode = 0;
+  } else if (coat === 'sable') {
+    V.base = srgb(clamp(0.80 * b + w, 0, 1), 0.545 * b, 0.255 * b);
+    V.tipc = srgb(0.95 * b, 0.72 * b, 0.42 * b);
+    V.tan = V.base; V.mode = 1;
+  } else if (coat === 'tri') {
+    V.base = srgb(0.075, 0.062, 0.055);
+    V.tan = srgb(clamp(0.62 * b + w, 0, 1), 0.285 * b, 0.09 * b);
+    V.tipc = srgb(0.82 * b, 0.45 * b, 0.18 * b);
+    V.mode = 2;
+  } else {
+    V.base = srgb(clamp(0.56 * b + w, 0, 1), 0.235 * b, 0.075 * b);
+    V.tipc = srgb(0.78 * b, 0.42 * b, 0.18 * b);
+    V.tan = V.base; V.mode = 3;
+  }
+  return V;
+}
+
+function coatFields(x, y, z, V, out) {
+  var ax = Math.abs(x);
+  var n1 = fbm(x * 2.4 + V.o1, y * 2.4 + V.o2, z * 2.4 + V.o3, V.ns);
+  var n2 = fbm(x * 1.7 + V.o3, y * 1.7 + V.o1, z * 1.7 + V.o2, V.ns + 5);
+  var n3 = fbm(x * 5.0 + V.o2, y * 5.0 + V.o3, z * 5.0 + V.o1, V.ns + 9);
+  var yBody = V.wBody + 0.5 * (n1 - 0.5);
+  var yRump = V.wRump + V.chev * sstep(0.1, 1.2, ax) + 0.5 * (n1 - 0.5);
+  var yw = lerp(yBody, yRump, sstep(-1.3, 0.1, z));
+  var fW = yw - y;
+  var fK = 0, fT = 0;
+  if (V.mode === 0) {
+    fT = clamp((0.05 + 0.35 * n3) * (0.3 + 0.7 * sstep(1.4, 2.9, y)), 0, 1);
+  } else if (V.mode === 1) {
+    fT = clamp((0.62 + 0.6 * sstep(0.9, 2.2, y)) * (0.7 + 0.8 * n3), 0, 1);
+  } else if (V.mode === 2) {
+    fK = y - (yw + V.tanBand + 0.5 * (n2 - 0.5));
+    fT = 0.0;
+  } else {
+    fT = clamp(sstep(1.3, 2.4, y) * (0.55 + 1.0 * n3), 0, 1);
+    fK = (y - 2.25) + 0.5 * (n2 - 0.5);
+  }
+  out[0] = fW; out[1] = fK; out[2] = fT;
+}
+
+/* ====================================================================== */
+/*                                 GL                                      */
+/* ====================================================================== */
+var canvas = document.getElementById('c');
+canvas.addEventListener('webglcontextlost', function (e) { e.preventDefault(); });
+canvas.addEventListener('webglcontextrestored', function () { location.reload(); });
+var gl = canvas.getContext('webgl2', { antialias: true, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance' });
+if (!gl) return;
+
+var GLSL_VERT = [
+'#version 300 es',
+'precision highp float;',
+'layout(location=0) in vec4 aP;',
+'layout(location=1) in vec4 aN;',
+'layout(location=2) in vec4 aF;',
+'layout(location=3) in vec4 aS;',
+'uniform mat4 uVP;',
+'uniform vec4 uA;   // yaw, roll, pitch, squash',
+'uniform vec4 uT;   // tx, ty, tz, lift',
+'uniform vec4 uB;   // bodyX, waveAmp, wavePhase, waveK',
+'uniform vec4 uC;   // pawL, pawR, tailYaw, tailPitch',
+'uniform vec4 uD;   // breath, furScale, shells, time',
+'uniform vec3 uJig; uniform vec3 uLagL; uniform vec3 uLagR; uniform vec3 uLagT;',
+'out vec3 vB; out vec3 vNr; out vec3 vN; out vec3 vW; out float vH; out vec4 vF; out vec2 vLA;',
+'const vec3 PV = vec3(0.0,1.75,-1.6);',
+'const vec3 TP = vec3(0.0,2.05,0.5);',
+'uniform mat3 uR; uniform mat3 uRt;',
+'void main(){',
+'  vec3 p=aP.xyz; vec3 n=aN.xyz;',
+'  vec3 p0=p;',
+'  #ifdef BASE',
+'  float h=0.0;',
+'  #else',
+'  float h=float(gl_InstanceID+1)/uD.z;',
+'  #endif',
+'  float wt=aS.w;',
+'  if(wt>0.001){ vec3 q=TP+uRt*(p-TP); p=mix(p,q,wt); n=normalize(mix(n,uRt*n,wt)); }',
+'  float lift=aS.y*uC.x+aS.z*uC.y;',
+'  p.y+=lift; p.z-=0.22*lift;',
+'  float w=aS.x;',
+'  vec3 q2=PV+uR*(p-PV)+uT.xyz;',
+'  p=mix(p,q2,w);',
+'  n=normalize(mix(n,uR*n,w));',
+'  float sq=uA.w;',
+'  p.y*=1.0-sq*w;',
+'  p.x*=1.0+0.5*sq*w;',
+'  p.z=-0.4+(p.z+0.4)*(1.0+0.5*sq*w);',
+'  float bw=smoothstep(0.35,1.5,p.y);',
+'  p+= (p-vec3(0.0,1.75,-1.6))*uD.x*bw;',
+'  p.x+=(uB.x+uB.y*sin(uB.z+uB.w*p.z))*bw;',
+'  p+=uJig*w*smoothstep(-0.8,0.8,p0.z);',
+'  p.y+=uT.w;',
+'  vec3 nd=n;',
+'  float L=aP.w*uD.y;',
+'  float top=smoothstep(0.30,0.80,aN.y);',
+'  vec3 g=normalize(mix(vec3(0.0,-1.0,0.10),vec3(0.0,-0.10,1.0),top));',
+'  vec3 comb=g-nd*dot(g,nd);',
+'  float cl=length(comb);',
+'  comb=cl>1e-3?comb/cl:vec3(0.0,0.0,1.0);',
+'  vec3 lag=mix(uLagL,uLagR,smoothstep(-0.5,0.5,p0.x));',
+'  lag=mix(lag,uLagT,wt);',
+'  float hh=h*h;',
+'  float fl=aF.w;',
+'  vec3 dv=normalize(nd*mix(0.42,0.95,fl)+comb*mix(1.0,0.45,fl));',
+'  p+=dv*(h*L)+vec3(0.0,-1.0,0.0)*(mix(0.30,0.16,fl)*hh*L)+lag*(hh*fl);',
+'  vB=p0; vNr=aN.xyz; vN=nd; vW=p; vH=h; vF=aF; vLA=vec2(aP.w,aN.w);',
+'  gl_Position=uVP*vec4(p,1.0);',
+'}'
+].join('\n');
+
+var GLSL_LIGHT = [
+'const vec3 LDIR=normalize(vec3(-0.50,0.82,0.60));',
+'vec3 shade(vec3 alb, vec3 N, vec3 V, float occ, float keyOcc){',
+'  float ndl=dot(N,LDIR);',
+'  float wrap=clamp((ndl+0.5)/1.5,0.0,1.0);',
+'  wrap=wrap*wrap*(3.0-2.0*wrap);',
+'  vec3 key=vec3(1.0,0.88,0.72)*1.75*wrap*keyOcc;',
+'  float fl=clamp(dot(N,normalize(vec3(0.75,0.25,0.45)))*0.5+0.5,0.0,1.0);',
+'  vec3 fill=vec3(0.62,0.70,0.82)*0.26*fl;',
+'  vec3 amb=mix(vec3(0.46,0.37,0.29),vec3(0.66,0.70,0.76),N.y*0.5+0.5)*0.46;',
+'  float fres=pow(1.0-clamp(dot(N,V),0.0,1.0),3.0);',
+'  vec3 rim=vec3(1.0,0.86,0.70)*fres*0.28;',
+'  return alb*(key+(fill+amb)*occ)+rim*occ*alb*1.5;',
+'}',
+'vec3 tonemap(vec3 c){ c=c/(1.0+0.10*c); return pow(clamp(c,0.0,1.0),vec3(1.0/2.2)); }'
+].join('\n');
+
+var GLSL_GROUND_FN = [
+'uniform vec3 uShC[12]; uniform vec3 uShR[12]; uniform float uShW[12];',
+'uniform vec3 uBg; uniform vec3 uGround;',
+'const vec3 GLDIR=normalize(vec3(-0.50,0.82,0.60));',
+'float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }',
+'float vn(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(hash12(i),hash12(i+vec2(1,0)),f.x),mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),f.x),f.y); }',
+'vec3 groundShade(vec3 P, float aoK){',
+'  float sh=1.0; float ao=0.0;',
+'  for(int i=0;i<12;i++){',
+'    vec3 c=uShC[i]; vec3 r=uShR[i];',
+'    vec3 q=(P-c)/r; vec3 dd=GLDIR/r;',
+'    float tt=max(dot(-q,dd)/dot(dd,dd),0.0);',
+'    vec3 m=q+dd*tt;',
+'    float dist=length(m);',
+'    float pen=0.20+0.11*tt;',
+'    float occ=1.0-smoothstep(1.0-pen,1.0+pen,dist);',
+'    sh*=1.0-occ*0.62*uShW[i];',
+'    vec3 v=c-P; float d2=dot(v,v); float rr=pow(r.x*r.y*r.z,0.3333);',
+'    float cs=max(v.y/sqrt(d2),0.0);',
+'    float aw=(aoK>0.5||i<7||i>10)?1.0:0.0;',
+'    ao+=clamp(rr*rr/d2*cs,0.0,1.0)*0.55*uShW[i]*aw;',
+'  }',
+'  ao=clamp(ao,0.0,0.85);',
+'  float dist=length(P.xz-vec2(0.0,-0.4));',
+'  float pool=exp(-dist*dist/(2.0*7.0*7.0));',
+'  float grain=vn(P.xz*9.0)*0.5+vn(P.xz*31.0)*0.5;',
+'  vec3 base=uGround*mix(0.80,1.04,pool)*(0.965+0.07*grain);',
+'  vec3 lit=base*mix(vec3(0.60,0.54,0.56),vec3(1.0),sh);',
+'  lit*=1.0-ao;',
+'  float far=smoothstep(10.0,34.0,dist);',
+'  return mix(lit,uBg,far);',
+'}'
+].join('\n');
+
+var GLSL_GROUND_FRAG = [
+'#version 300 es',
+'precision highp float;',
+'in vec3 vW; out vec4 oC;',
+GLSL_GROUND_FN,
+'void main(){ oC=vec4(groundShade(vW,1.0),1.0); }'
+].join('\n');
+
+var GLSL_FRAG_COMMON = [
+'#version 300 es',
+'precision highp float; precision highp int;',
+'in vec3 vB; in vec3 vNr; in vec3 vN; in vec3 vW; in float vH; in vec4 vF; in vec2 vLA;',
+'uniform vec3 uCam; uniform uvec3 uSeedU; uniform float uDens; uniform int uMode;',
+'uniform vec3 uBase; uniform vec3 uTipC; uniform vec3 uDark; uniform vec3 uTan; uniform vec3 uWhite;',
+'uniform vec4 uP;',
+'out vec4 oC;',
+'uvec3 pcg3d(uvec3 v){ v=v*1664525u+1013904223u; v.x+=v.y*v.z; v.y+=v.z*v.x; v.z+=v.x*v.y; v^=v>>16u; v.x+=v.y*v.z; v.y+=v.z*v.x; v.z+=v.x*v.y; return v; }',
+'vec3 rnd(uvec3 v){ return vec3(pcg3d(v))*(1.0/4294967296.0); }',
+GLSL_LIGHT
+].join('\n');
+
+var GLSL_FRAG_SHELL = GLSL_FRAG_COMMON + '\n' + [
+'float strand(vec2 uv, float dens, float rot, uvec3 salt, int ax, float h, out vec3 r, out vec3 r2, out vec2 q, out float t, out float cv){',
+'  float cr=cos(rot), sr=sin(rot);',
+'  vec2 cuv=mat2(cr,-sr,sr,cr)*uv*dens;',
+'  vec2 id=floor(cuv); vec2 f=fract(cuv)-0.5;',
+'  uvec3 key=uvec3(ivec3(ivec2(id),ax))+salt;',
+'  r=rnd(key);',
+'  r2=rnd(key.zxy+uvec3(7919u,104729u,15485863u));',
+'  vec2 cj=(r.xy-0.5)*0.36;',
+'  float hs=min(h,1.0);',
+'  vec2 qq=f-cj-(r2.xy-0.5)*0.7*hs*hs;',
+'  float d=length(qq)*2.0;',
+'  q=mat2(cr,sr,-sr,cr)*qq;',
+'  vec2 cid=floor(cuv/4.0);',
+'  vec3 rc=rnd(uvec3(ivec3(ivec2(cid),ax+9))+salt.zxy);',
+'  cv=rc.y;',
+'  float guardH=step(0.93,r.z);',
+'  float len=mix(0.58,0.90,r2.x);',
+'  len=mix(len,1.0,guardH);',
+'  len*=mix(0.82,1.06,rc.x);',
+'  len=min(len,1.0);',
+'  t=h/len;',
+'  if(h>len) return 0.0;',
+'  float rad=mix(0.92,0.24,pow(t,0.8))*mix(0.82,1.0,r2.y);',
+'  return 1.0-smoothstep(rad-0.24,rad,d);',
+'}',
+'void main(){',
+'  float h=vH;',
+'  float fade=1.0-smoothstep(uP.x,uP.y,-vB.z);',
+'  fade*=fade;',
+'  if(fade<0.03) discard;',
+'  vec3 an=abs(vNr); vec2 uv; int ax;',
+'  if(an.y>=an.x&&an.y>=an.z){ax=1;uv=vB.xz;}else if(an.x>=an.z){ax=0;uv=vB.zy;}else{ax=2;uv=vB.xy;}',
+'  vec3 r,r2,rB,r2B; vec2 q,qB; float t,tB,cv,cvB;',
+'  float aA=strand(uv,uDens,0.0,uSeedU,ax,h,r,r2,q,t,cv);',
+'  float aB=strand(uv+vec2(3.7,1.9),uDens*0.74,0.62,uSeedU.yzx,ax,h,rB,r2B,qB,tB,cvB);',
+'  if(aB>aA){ r=rB; r2=r2B; q=qB; t=tB; cv=cvB; aA=aB; }',
+'  float a=aA*fade;',
+'  if(a<0.04) discard;',
+'  // ---- colour',
+'  float jit=(r2.z-0.5)*0.34;',
+'  float wm=smoothstep(-0.05,0.05,vF.x+jit);',
+'  vec3 col=uBase;',
+'  if(uMode==2){ float km=smoothstep(-0.05,0.05,vF.y+(r.x-0.5)*0.3); col=mix(uTan,uDark,km); }',
+'  if(uMode==3){ float km=smoothstep(-0.05,0.05,vF.y+(r.x-0.5)*0.3); col=mix(col,uDark,km*0.85); }',
+'  float tipM=vF.z*smoothstep(0.18,0.85,t)*mix(0.7,1.0,r2.x);',
+'  if(uMode==1||uMode==3) col=mix(col,uDark,tipM);',
+'  else if(uMode==0) col=mix(col,uTipC,smoothstep(0.35,1.0,t)*0.45);',
+'  else if(uMode==2) col=mix(col,col*1.25,smoothstep(0.35,1.0,t)*0.25*(1.0-wm));',
+'  vec3 wcol=uWhite*mix(0.80,1.0,smoothstep(0.0,0.5,t));',
+'  col=mix(col,wcol,wm);',
+'  col*=mix(0.88,1.08,r.y)*mix(0.84,1.07,cv);',
+'  // ---- shading',
+'  vec3 N=normalize(vN);',
+'  vec3 off=ax==1?vec3(q.x,0.0,q.y):(ax==0?vec3(0.0,q.y,q.x):vec3(q.x,q.y,0.0));',
+'  vec3 Ns=normalize(N+off*1.4);',
+'  vec3 V=normalize(uCam-vW);',
+'  float occ=vLA.y*mix(0.30,1.0,pow(h,0.55));',
+'  occ*=mix(0.55,1.0,smoothstep(0.0,0.5,vW.y));',
+'  vec3 c=shade(col,Ns,V,occ,mix(occ,1.0,0.35));',
+'  oC=vec4(tonemap(c),a);',
+'}'
+].join('\n');
+
+var GLSL_FRAG_BASE = GLSL_FRAG_COMMON + '\n' + GLSL_GROUND_FN + '\n' + [
+'void main(){',
+'  float fog=smoothstep(uP.x,uP.y,-vB.z);',
+'  float wm=smoothstep(-0.05,0.05,vF.x);',
+'  vec3 col=uBase;',
+'  if(uMode==2){ float km=smoothstep(-0.05,0.05,vF.y); col=mix(uTan,uDark,km); }',
+'  if(uMode==3){ float km=smoothstep(-0.05,0.05,vF.y); col=mix(col,uDark,km*0.85); }',
+'  col=mix(col,uWhite*0.78,wm);',
+'  col*=0.62;',
+'  vec3 N=normalize(vN);',
+'  vec3 V=normalize(uCam-vW);',
+'  float occ=vLA.y*0.45*mix(0.55,1.0,smoothstep(0.0,0.5,vW.y));',
+'  vec3 c=tonemap(shade(col,N,V,occ,occ));',
+'  if(fog>0.002){',
+'    vec3 rd=normalize(vW-uCam);',
+'    vec3 behind=uBg;',
+'    if(rd.y<-0.002){ float tg=-uCam.y/rd.y; behind=groundShade(uCam+rd*tg,0.0); }',
+'    c=mix(c,behind,fog);',
+'  }',
+'  oC=vec4(c,1.0);',
+'}'
+].join('\n');
+
+var GLSL_GROUND_VERT = [
+'#version 300 es',
+'precision highp float;',
+'layout(location=0) in vec2 aXZ;',
+'uniform mat4 uVP; out vec3 vW;',
+'void main(){ vec3 p=vec3(aXZ.x,0.0,aXZ.y); vW=p; gl_Position=uVP*vec4(p,1.0); }'
+].join('\n');
+
+function compile(type, src) {
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+function program(vs, fs, defs) {
+  var p = gl.createProgram();
+  var vsrc = defs ? vs.replace('precision highp float;', 'precision highp float;\n' + defs) : vs;
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsrc));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  var locs = {};
+  var n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (var i = 0; i < n; i++) {
+    var info = gl.getActiveUniform(p, i);
+    var name = info.name.replace(/\[0\]$/, '');
+    locs[name] = gl.getUniformLocation(p, info.name);
+  }
+  return { p: p, u: locs };
+}
+
+var progBase, progShell, progGround;
+try {
+  progBase = program(GLSL_VERT, GLSL_FRAG_BASE, '#define BASE');
+  progShell = program(GLSL_VERT, GLSL_FRAG_SHELL, '');
+  progGround = program(GLSL_GROUND_VERT, GLSL_GROUND_FRAG, '');
+} catch (err) { return; }
+
+/* ------------------------------------------------------------ geometry */
+var mesh = buildMesh(0.06);
+var NV = mesh.nv;
+var STRIDE = 16;
+var vdata = new Float32Array(NV * STRIDE);
+(function fillStatic() {
+  for (var v = 0; v < NV; v++) {
+    var x = mesh.P[v * 3], y = mesh.P[v * 3 + 1], z = mesh.P[v * 3 + 2];
+    var nx = mesh.N[v * 3], ny = mesh.N[v * 3 + 1], nz = mesh.N[v * 3 + 2];
+    var noise = fbm(x * 3.1 + 7.7, y * 3.1 + 1.3, z * 3.1 + 4.1, 3);
+    var o = v * STRIDE;
+    vdata[o] = x; vdata[o + 1] = y; vdata[o + 2] = z;
+    vdata[o + 3] = furLenAt(x, y, z, nx, ny, nz, noise);
+    vdata[o + 4] = nx; vdata[o + 5] = ny; vdata[o + 6] = nz;
+    var ao = aoAt(x, y, z, nx, ny, nz);
+    ao *= lerp(0.55, 1, sstep(0.0, 0.8, y));
+    vdata[o + 7] = ao;
+    vdata[o + 11] = fluffAt(x, y, z);
+    vdata[o + 12] = wRumpAt(x, y, z);
+    vdata[o + 13] = wPawLAt(x, y, z);
+    vdata[o + 14] = wPawRAt(x, y, z);
+    vdata[o + 15] = wTailAt(x, y, z);
+  }
+})();
+
+var vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+var vbuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
+gl.bufferData(gl.ARRAY_BUFFER, vdata, gl.DYNAMIC_DRAW);
+for (var ai = 0; ai < 4; ai++) {
+  gl.enableVertexAttribArray(ai);
+  gl.vertexAttribPointer(ai, 4, gl.FLOAT, false, STRIDE * 4, ai * 16);
+}
+var ibuf = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.idx, gl.STATIC_DRAW);
+var NIDX = mesh.idx.length;
+
+var gvao = gl.createVertexArray();
+gl.bindVertexArray(gvao);
+var gbuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, gbuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-90, -90, 90, -90, 90, 90, -90, -90, 90, 90, -90, 90]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+/* ----------------------------------------------------------- dog state */
+var dog = { seed: '0', coat: 'red', V: null, sp: [0, 0], rngWig: null, rngIdle: null };
+var tmpF = [0, 0, 0];
+
+function applyHash() {
+  var hp = readHash();
+  var seed = hp.seed !== null ? hp.seed : freshSeed();
+  dog.seed = seed;
+  dog.sp = seedParts(seed);
+  dog.V = makeCoat(seed, hp.coat);
+  dog.coat = dog.V.coat;
+  dog.rngWig = makeStream(dog.sp[0], dog.sp[1], 2);
+  dog.rngIdle = makeStream(dog.sp[0], dog.sp[1], 3);
+  for (var v = 0; v < NV; v++) {
+    coatFields(vdata[v * STRIDE], vdata[v * STRIDE + 1], vdata[v * STRIDE + 2], dog.V, tmpF);
+    vdata[v * STRIDE + 8] = tmpF[0]; vdata[v * STRIDE + 9] = tmpF[1]; vdata[v * STRIDE + 10] = tmpF[2];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, vdata);
+  resetSim();
+  window.__corgi = window.__corgi || {};
+  window.__corgi.seed = seed;
+  window.__corgi.coat = dog.coat;
+}
+
+/* ===================================================================== */
+/*                          Animation / simulation                       */
+/* ===================================================================== */
+var ch = { yaw: 0, roll: 0, pitch: 0, tx: 0, ty: 0, tz: 0, sq: 0, bodyX: 0, wAmp: 0, wPh: 0, wK: 0, pawL: 0, pawR: 0, tailYaw: 0, tailPitch: 0, lift: 0, breath: 0 };
+var acc = { yaw: 0, roll: 0, pitch: 0, tx: 0, ty: 0, tz: 0, sq: 0, bodyX: 0, wAmp: 0, wPh: 0, wK: 0, pawL: 0, pawR: 0, tailYaw: 0, tailPitch: 0, lift: 0, breath: 0 };
+var simT = 0, exc = 0, lastType = -1, wiggles = [];
+var idle = { ws: 0, wsT: 0, nextShift: 3, nextTwitch: 2, twitchT: -10, twitchA: 0, bph: 0, nShift: 0 };
+var wiggleLog = [];
+
+var springs = [
+  { a: [-0.58, 0.95, 0.6], f: 4.6, z: 0.20, m: 0.38, kind: 0 },
+  { a: [0.58, 0.95, 0.6], f: 5.3, z: 0.23, m: 0.38, kind: 0 },
+  { a: [0, 2.1, 0.95], f: 8.0, z: 0.16, m: 0.55, kind: 1 },
+  { a: [0, 1.75, 0.3], f: 6.2, z: 0.28, m: 0.22, kind: 0 }
+];
+function resetSim() {
+  simT = 0; exc = 0; lastType = -1; wiggles = []; wiggleLog.length = 0;
+  idle.ws = 0; idle.wsT = 0; idle.nextShift = 2.5 + 3 * dog.rngIdle(); idle.nextTwitch = 1.5 + 3 * dog.rngIdle();
+  idle.twitchT = -10; idle.bph = dog.rngIdle() * TAU;
+  for (var k in acc) { acc[k] = 0; ch[k] = 0; }
+  for (var i = 0; i < springs.length; i++) {
+    var s = springs[i]; s.s = [0, 0, 0]; s.v = [0, 0, 0]; s.p1 = null; s.p2 = null;
+  }
+}
+
+/* deformation mirror of the vertex shader (for springs, shadows, picking) */
+var Rm = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+var Rt = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+var Rm9 = new Float32Array(9), Rt9 = new Float32Array(9);
+function updateMats() {
+  Rm = mat3mul(rotYm(ch.yaw), mat3mul(rotZm(ch.roll), rotXm(ch.pitch)));
+  Rt = mat3mul(rotYm(ch.tailYaw), rotXm(ch.tailPitch));
+  for (var i = 0; i < 9; i++) { Rm9[i] = Rm[i]; Rt9[i] = Rt[i]; }
+}
+var dpOut = [0, 0, 0];
+function deformPoint(x, y, z, kind, out) {
+  // kind: 0 body, 1 tail, 2 pawL region, 3 pawR region
+  var wt = kind === 1 ? 1 : 0;
+  if (wt > 0) {
+    var dx = x - TP[0], dy = y - TP[1], dz = z - TP[2];
+    x = TP[0] + Rt[0] * dx + Rt[1] * dy + Rt[2] * dz;
+    y = TP[1] + Rt[3] * dx + Rt[4] * dy + Rt[5] * dz;
+    z = TP[2] + Rt[6] * dx + Rt[7] * dy + Rt[8] * dz;
+  }
+  var lift = wPawLAt(x, y, z) * ch.pawL + wPawRAt(x, y, z) * ch.pawR;
+  var x0 = x, z0 = z;
+  y += lift; z -= 0.22 * lift;
+  var w = wRumpAt(x, y, z);
+  var rx = x - PV[0], ry = y - PV[1], rz = z - PV[2];
+  var qx = PV[0] + Rm[0] * rx + Rm[1] * ry + Rm[2] * rz + ch.tx;
+  var qy = PV[1] + Rm[3] * rx + Rm[4] * ry + Rm[5] * rz + ch.ty;
+  var qz = PV[2] + Rm[6] * rx + Rm[7] * ry + Rm[8] * rz + ch.tz;
+  x += (qx - x) * w; y += (qy - y) * w; z += (qz - z) * w;
+  var sq = ch.sq;
+  y *= 1 - sq * w; x *= 1 + 0.5 * sq * w; z = -0.4 + (z + 0.4) * (1 + 0.5 * sq * w);
+  var bw = sstep(0.35, 1.5, y);
+  x += (ch.bodyX + ch.wAmp * Math.sin(ch.wPh + ch.wK * z)) * bw;
+  y += ch.lift;
+  out[0] = x; out[1] = y; out[2] = z;
+}
+
+/* ---------------------------------------------------------------- wiggles */
+var TYPES = ['happy', 'loaf', 'shimmy', 'hop', 'hula', 'flurry', 'shuffle'];
+function tanh(x) { var e = Math.exp(2 * x); return (e - 1) / (e + 1); }
+
+function spawnWiggle(force) {
+  var r = dog.rngWig, u = [];
+  for (var i = 0; i < 14; i++) u.push(r());
+  var ti = Math.floor(u[0] * TYPES.length);
+  if (ti === lastType) ti = (ti + 1 + Math.floor(u[1] * (TYPES.length - 1))) % TYPES.length;
+  if (force !== undefined) ti = force;
+  lastType = ti;
+  // existing wiggles wind down quickly
+  for (var k = 0; k < wiggles.length; k++) {
+    var o = wiggles[k];
+    if (o.cut < 0) o.cut = o.tau;
+  }
+  exc = Math.min(exc + 0.5, 1.7);
+  var w = {
+    type: TYPES[ti], u: u, tau: 0, ph: u[13] * 0.0, cut: -1,
+    dir: u[2] < 0.5 ? -1 : 1,
+    amp: lerp(0.82, 1.2, u[3]),
+    lead: lerp(-1.2, 1.2, u[4]),
+    skew: lerp(-0.55, 0.55, u[5]),
+    am: u[6] * 0.35,
+    x1: u[7], x2: u[8], x3: u[9], x4: u[10], x5: u[11], x6: u[12],
+    f: 1, dur: 2, atk: 0.15, rel: 0.4
+  };
+  switch (w.type) {
+    case 'happy': w.f = lerp(3.6, 6.0, w.x1); w.dur = lerp(1.3, 2.1, w.x2); w.atk = 0.12; w.rel = 0.45; break;
+    case 'loaf': w.f = lerp(0.8, 1.3, w.x1); w.dur = lerp(3.0, 4.2, w.x2); w.atk = 0.5; w.rel = 0.9; break;
+    case 'shimmy': w.f = lerp(7.5, 10.5, w.x1); w.dur = lerp(2.0, 3.0, w.x2); w.atk = 0.6; w.rel = 0.5; break;
+    case 'hop': w.f = 1; w.dur = 2.6; w.atk = 0.01; w.rel = 0.3; break;
+    case 'hula': w.f = lerp(1.5, 2.4, w.x1); w.dur = lerp(2.4, 3.4, w.x2); w.atk = 0.4; w.rel = 0.6; break;
+    case 'flurry': w.f = lerp(9, 13, w.x1); w.dur = lerp(1.2, 1.9, w.x2); w.atk = 0.1; w.rel = 0.35; break;
+    default: w.f = lerp(1.8, 2.9, w.x1); w.dur = lerp(2.4, 3.2, w.x2); w.atk = 0.3; w.rel = 0.5; break;
+  }
+  wiggles.push(w);
+  wiggleLog.push(w.type);
+  if (wiggleLog.length > 64) wiggleLog.shift();
+  window.__corgi.log = wiggleLog;
+}
+
+function hopCurve(t, H, tw, dir, E, a) {
+  var tCr = 0.20, tAir = 0.34 + 0.18 * tw;
+  var s = t;
+  if (s < 0) return;
+  if (s < tCr) {
+    var u = s / tCr, cr = Math.sin(u * Math.PI * 0.5);
+    a.sq += 0.10 * cr * E; a.ty -= 0.03 * cr * E; a.tailPitch += 0.2 * cr * E;
+  } else if (s < tCr + tAir) {
+    var u2 = (s - tCr) / tAir;
+    a.lift += H * 4 * u2 * (1 - u2) * E;
+    a.sq -= 0.06 * Math.sin(u2 * Math.PI) * E;
+    a.yaw += dir * (0.10 + 0.16 * tw) * Math.sin(u2 * Math.PI) * E;
+    a.tailPitch += 0.4 * Math.sin(u2 * Math.PI) * E;
+    var tuck = Math.sin(u2 * Math.PI);
+    a.pawL += 0.08 * tuck * E; a.pawR += 0.08 * tuck * E;
+  } else {
+    var g = s - tCr - tAir;
+    a.sq += 0.14 * Math.exp(-8 * g) * Math.cos(TAU * 2.2 * g) * E;
+    a.yaw += dir * 0.13 * Math.exp(-3.0 * g) * Math.sin(TAU * 4.8 * g) * E;
+    a.tailYaw += 0.8 * Math.exp(-2.2 * g) * Math.sin(TAU * 7 * g) * E;
+    a.roll += 0.03 * Math.exp(-3 * g) * Math.sin(TAU * 3.4 * g) * E;
+  }
+  return tCr + tAir;
+}
+
+function stepWiggle(w, dt, a) {
+  var dts = dt * (1 + 0.45 * exc);
+  w.tau += dts;
+  w.ph += TAU * w.f * dts;
+  var tau = w.tau;
+  var E = sstep(0, w.atk, tau) * (1 - sstep(w.dur - w.rel, w.dur, tau));
+  if (w.cut >= 0) E *= 1 - sstep(w.cut, w.cut + 0.3, tau);
+  var A = w.amp * (1 + 0.6 * exc) * E;
+  var ph = w.ph, dir = w.dir, lead = w.lead, am = 1 + w.am * Math.sin(ph * 0.37 + 1.1);
+  A *= am;
+  switch (w.type) {
+    case 'happy': {
+      var s = Math.sin(ph + w.skew * Math.sin(ph));
+      a.yaw += dir * 0.30 * A * s;
+      a.roll += dir * 0.05 * A * Math.cos(ph);
+      a.tx += dir * 0.10 * A * Math.sin(ph + lead * 0.3);
+      a.tailYaw += 0.8 * A * Math.sin(ph + 0.9 + lead) + 0.2 * A * Math.sin(2 * ph);
+      a.ty += 0.025 * A * Math.abs(Math.sin(ph));
+      a.bodyX += 0.02 * A * Math.sin(ph + 1.2);
+      a.pitch += 0.02 * A * Math.sin(2 * ph);
+      break;
+    }
+    case 'loaf': {
+      var s2 = tanh(2.4 * Math.sin(ph)) / 0.984;
+      a.yaw += dir * 0.24 * A * s2;
+      a.tx += dir * 0.26 * A * Math.sin(ph - 0.7 + lead * 0.2);
+      a.roll += dir * 0.06 * A * Math.sin(ph - 0.7);
+      a.pitch += 0.03 * A * Math.sin(2 * ph + 0.5);
+      a.sq += 0.015 * A * (1 - Math.cos(2 * ph));
+      a.tailYaw += 0.55 * A * Math.sin(ph - 1.3 + lead);
+      a.tz += 0.06 * A * Math.sin(ph + 0.3);
+      break;
+    }
+    case 'shimmy': {
+      a.pitch -= 0.11 * A;
+      a.ty += 0.02 * A;
+      a.yaw += dir * 0.075 * A * Math.sin(ph);
+      a.bodyX += 0.045 * A * Math.sin(ph + 0.4);
+      a.wAmp += 0.05 * A; a.wPh = ph; a.wK = (lead > 0 ? 1 : -1) * (0.7 + 0.5 * w.x3);
+      a.tailYaw += 0.6 * A * Math.sin(1.5 * ph + 1);
+      var pp = Math.sin(ph * 0.5);
+      a.pawL += 0.07 * E * Math.max(0, dir * pp);
+      a.pawR += 0.07 * E * Math.max(0, -dir * pp);
+      a.sq += 0.01 * A * Math.sin(2 * ph);
+      break;
+    }
+    case 'hop': {
+      var H = lerp(0.28, 0.46, w.x2) * (1 + 0.2 * exc);
+      var Ef = 1 - sstep(w.dur - 0.3, w.dur, tau);
+      if (w.cut >= 0) Ef *= 1 - sstep(w.cut, w.cut + 0.3, tau);
+      var endT = hopCurve(tau, H, w.x3, dir, Ef, a);
+      if (w.x4 > 0.5) hopCurve(tau - endT - 0.22, H * 0.55, w.x5, -dir, Ef, a);
+      break;
+    }
+    case 'hula': {
+      a.tx += dir * 0.22 * A * Math.sin(ph);
+      a.tz += 0.20 * A * Math.cos(ph);
+      a.yaw += dir * 0.12 * A * Math.sin(ph + 0.5 + lead * 0.3);
+      a.roll += dir * 0.05 * A * Math.cos(ph);
+      a.pitch += 0.04 * A * Math.sin(ph);
+      a.tailYaw += 0.5 * A * Math.sin(ph + 1.6 + lead);
+      break;
+    }
+    case 'flurry': {
+      a.tailYaw += 1.0 * A * Math.sin(ph) + 0.3 * A * Math.sin(1.73 * ph + 1);
+      a.tailPitch += 0.35 * A * Math.sin(ph * 1.31 + 0.4);
+      a.yaw += dir * 0.10 * A * Math.sin(ph * 0.31 + lead);
+      a.tx += 0.05 * A * Math.sin(ph * 0.31 + lead + 0.6);
+      a.pitch += 0.03 * A * Math.sin(ph * 0.62);
+      var tp = sstep(0.4, 0.55, tau) * (1 - sstep(0.75, 0.9, tau));
+      if (dir > 0) a.pawL += 0.12 * tp * E; else a.pawR += 0.12 * tp * E;
+      break;
+    }
+    default: { // shuffle
+      var ss = Math.sin(ph);
+      a.pawL += 0.18 * A * Math.pow(Math.max(0, dir * ss), 1.2);
+      a.pawR += 0.18 * A * Math.pow(Math.max(0, -dir * ss), 1.2);
+      a.yaw += dir * 0.10 * A * ss;
+      a.tx += dir * 0.12 * A * Math.sin(ph + 0.4);
+      a.roll += dir * 0.05 * A * ss;
+      a.sq += 0.012 * A * (1 - Math.cos(2 * ph));
+      a.tailYaw += 0.5 * A * Math.sin(2 * ph + lead);
+      break;
+    }
+  }
+}
+
+var buzzPh = 0;
+function simStep(h) {
+  simT += h;
+  var k;
+  for (k in acc) acc[k] = 0;
+  // ---- idle
+  idle.bph += TAU * (0.42 + 0.05 * Math.sin(simT * 0.13)) * h;
+  var br = Math.sin(idle.bph);
+  acc.breath += 0.0065 * br;
+  acc.pitch += 0.004 * br;
+  acc.ty += 0.006 * br;
+  acc.yaw += 0.020 * Math.sin(simT * 0.9 + 1.3) + 0.012 * Math.sin(simT * 0.52);
+  acc.tx += 0.025 * Math.sin(simT * 0.6);
+  acc.roll += 0.008 * Math.sin(simT * 0.43 + 2.0);
+  if (simT > idle.nextShift) {
+    var rr = dog.rngIdle();
+    idle.wsT = idle.nShift++ % 2 === 0 ? (0.6 + 0.4 * rr) * (dog.rngIdle() < 0.5 ? -1 : 1) : 0;
+    idle.nextShift = simT + 3 + 5 * dog.rngIdle();
+  }
+  idle.ws += (idle.wsT - idle.ws) * (1 - Math.exp(-h * 2.2));
+  acc.roll += idle.ws * 0.04; acc.tx += idle.ws * 0.07; acc.yaw -= idle.ws * 0.02; acc.sq += 0.01 * Math.abs(idle.ws);
+  if (simT > idle.nextTwitch) {
+    idle.twitchT = simT; idle.twitchA = 0.25 + 0.3 * dog.rngIdle();
+    idle.nextTwitch = simT + 2.5 + 4 * dog.rngIdle();
+  }
+  var tw = simT - idle.twitchT;
+  if (tw >= 0 && tw < 0.6) acc.tailYaw += idle.twitchA * Math.sin(TAU * 7 * tw) * Math.sin(Math.PI * tw / 0.6);
+  acc.tailYaw += 0.06 * Math.sin(simT * 0.7);
+  // ---- excitement
+  exc *= Math.exp(-h / 2.0);
+  if (exc < 0.002) exc = 0;
+  var buzz = sstep(0.12, 1.0, exc);
+  if (buzz > 0) {
+    buzzPh += TAU * (5.2 + 2.0 * exc) * h;
+    acc.tailYaw += 0.55 * buzz * Math.sin(buzzPh);
+    acc.yaw += 0.035 * buzz * Math.sin(buzzPh * 0.85 + 0.7);
+    acc.tx += 0.03 * buzz * Math.sin(buzzPh * 0.85 + 1.4);
+  }
+  // ---- wiggles
+  for (var i = wiggles.length - 1; i >= 0; i--) {
+    stepWiggle(wiggles[i], h, acc);
+    if (wiggles[i].tau >= wiggles[i].dur) wiggles.splice(i, 1);
+  }
+  // ---- soft limits -> channels
+  ch.yaw = 0.30 * tanh(acc.yaw / 0.30);
+  ch.roll = 0.11 * tanh(acc.roll / 0.11);
+  ch.pitch = 0.14 * tanh(acc.pitch / 0.14);
+  ch.tx = 0.38 * tanh(acc.tx / 0.38);
+  ch.ty = acc.ty;
+  ch.tz = 0.3 * tanh(acc.tz / 0.3);
+  ch.sq = 0.2 * tanh(acc.sq / 0.2);
+  ch.bodyX = 0.12 * tanh(acc.bodyX / 0.12);
+  ch.wAmp = acc.wAmp; ch.wPh = acc.wPh; ch.wK = acc.wK;
+  ch.pawL = acc.pawL; ch.pawR = acc.pawR;
+  ch.tailYaw = 1.2 * tanh(acc.tailYaw / 1.2);
+  ch.tailPitch = 0.5 * tanh(acc.tailPitch / 0.5);
+  ch.lift = Math.max(0, acc.lift);
+  ch.breath = acc.breath;
+  updateMats();
+  // ---- secondary springs
+  for (var si = 0; si < springs.length; si++) {
+    var s = springs[si];
+    deformPoint(s.a[0], s.a[1], s.a[2], s.kind, dpOut);
+    var p0 = [dpOut[0], dpOut[1], dpOut[2]];
+    if (!s.p1) { s.p1 = p0.slice(); s.p2 = p0.slice(); }
+    var w2 = TAU * s.f, ih2 = 1 / (h * h);
+    for (var c = 0; c < 3; c++) {
+      var a = clamp((p0[c] - 2 * s.p1[c] + s.p2[c]) * ih2, -700, 700);
+      s.v[c] += (-w2 * w2 * s.s[c] - 2 * s.z * w2 * s.v[c] - s.m * a) * h;
+      s.s[c] += s.v[c] * h;
+    }
+    var ml = Math.hypot(s.s[0], s.s[1], s.s[2]), lim = si === 3 ? 0.07 : 0.36;
+    if (ml > lim * 0.55) { var sc = lim * tanh(ml / lim) / ml; s.s[0] *= sc; s.s[1] *= sc; s.s[2] *= sc; }
+    s.p2 = s.p1; s.p1 = p0;
+  }
+}
+
+/* ===================================================================== */
+/*                       Shadow / pick proxies (ellipsoids)              */
+/* ===================================================================== */
+// cx,cy,cz, rx,ry,rz, kind (0 body,1 pawL,2 pawR,3 tail), shadowWeight
+var PRIMS = [
+  [-0.52, 1.74, 0.0, 0.58, 0.76, 0.78, 0, 1.0],
+  [0.52, 1.74, 0.0, 0.58, 0.76, 0.78, 0, 1.0],
+  [0, 1.85, -0.3, 0.5, 0.46, 0.92, 0, 1.0],
+  [0, 1.78, -1.7, 0.78, 0.78, 1.2, 0, 1.0],
+  [0, 1.78, -3.0, 0.6, 0.6, 1.0, 0, 0.4],
+  [-0.58, 1.26, 0.08, 0.46, 0.6, 0.58, 0, 1.0],
+  [0.58, 1.26, 0.08, 0.46, 0.6, 0.58, 0, 1.0],
+  [-0.58, 0.13, 0.0, 0.25, 0.17, 0.44, 1, 1.0],
+  [0.58, 0.13, 0.0, 0.25, 0.17, 0.44, 2, 1.0],
+  [-0.58, 0.54, 0.42, 0.22, 0.40, 0.25, 1, 1.0],
+  [0.58, 0.54, 0.42, 0.22, 0.40, 0.25, 2, 1.0],
+  [0, 2.05, 0.62, 0.18, 0.18, 0.34, 3, 0.6]
+];
+var shC = new Float32Array(36), shR = new Float32Array(36), shW = new Float32Array(12);
+function updatePrims() {
+  for (var i = 0; i < PRIMS.length; i++) {
+    var p = PRIMS[i];
+    deformPoint(p[0], p[1], p[2], p[6] === 3 ? 1 : 0, dpOut);
+    shC[i * 3] = dpOut[0]; shC[i * 3 + 1] = dpOut[1]; shC[i * 3 + 2] = dpOut[2];
+    shR[i * 3] = p[3]; shR[i * 3 + 1] = p[4]; shR[i * 3 + 2] = p[5];
+    shW[i] = p[7];
+  }
+}
+
+/* ===================================================================== */
+/*                              Camera / input                           */
+/* ===================================================================== */
+var DEG = Math.PI / 180;
+var EL_MIN = 3 * DEG, EL_MAX = 70 * DEG;
+var cam = { az: 0, el: 17 * DEG, tAz: 0, tEl: 17 * DEG, dist: 11.8, tanH: Math.tan(13 * DEG), look: [0, 1.3, -1.0], piv: [0, 0, -1.0] };
+var aspect = 1, cw = 400, chh = 400, dpr = 1, quality = { shells: 34, scale: 1 };
+var camEye = [0, 0, 0], camBasis = null, VP = null;
+
+function updateCamera() {
+  var ce = Math.cos(cam.el);
+  camEye[0] = cam.piv[0] + cam.dist * ce * Math.sin(cam.az);
+  camEye[1] = cam.piv[1] + cam.dist * Math.sin(cam.el);
+  camEye[2] = cam.piv[2] + cam.dist * ce * Math.cos(cam.az);
+  camBasis = m4look(camEye, cam.look);
+  var th = aspect >= 1 ? cam.tanH : cam.tanH / aspect;
+  var proj = m4persp(2 * Math.atan(th), aspect, 0.5, 160);
+  VP = m4mul(proj, camBasis.m);
+  cam.th = th;
+}
+function rayFromPixel(px, py) {
+  var nx = (px / cw) * 2 - 1, ny = 1 - (py / chh) * 2;
+  var b = camBasis, tx = nx * cam.th * aspect, ty = ny * cam.th;
+  var dx = b.fwd[0] + b.right[0] * tx + b.up[0] * ty;
+  var dy = b.fwd[1] + b.right[1] * tx + b.up[1] * ty;
+  var dz = b.fwd[2] + b.right[2] * tx + b.up[2] * ty;
+  var l = Math.hypot(dx, dy, dz);
+  return [dx / l, dy / l, dz / l];
+}
+function pickDog(px, py) {
+  var d = rayFromPixel(px, py), o = camEye, infl = 0.2;
+  for (var i = 0; i < PRIMS.length; i++) {
+    var rx = shR[i * 3] + infl, ry = shR[i * 3 + 1] + infl, rz = shR[i * 3 + 2] + infl;
+    var ox = (o[0] - shC[i * 3]) / rx, oy = (o[1] - shC[i * 3 + 1]) / ry, oz = (o[2] - shC[i * 3 + 2]) / rz;
+    var dx = d[0] / rx, dy = d[1] / ry, dz = d[2] / rz;
+    var A = dx * dx + dy * dy + dz * dz, Bq = ox * dx + oy * dy + oz * dz, C = ox * ox + oy * oy + oz * oz - 1;
+    var disc = Bq * Bq - A * C;
+    if (disc >= 0 && (-Bq + Math.sqrt(disc)) / A > 0) return true;
+  }
+  return false;
+}
+
+var drag = null;
+canvas.addEventListener('pointerdown', function (e) {
+  if (e.button !== undefined && e.button > 0) return;
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0 };
+  try { canvas.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+  canvas.classList.add('drag');
+});
+canvas.addEventListener('pointermove', function (e) {
+  var rect = canvas.getBoundingClientRect();
+  if (drag && e.pointerId === drag.id) {
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+    drag.moved += Math.abs(dx) + Math.abs(dy);
+    cam.tAz -= dx * 0.0085;
+    cam.tEl = clamp(cam.tEl + dy * 0.0065, EL_MIN, EL_MAX);
+  } else if (!drag && camBasis) {
+    var hit = pickDog(e.clientX - rect.left, e.clientY - rect.top);
+    canvas.classList.toggle('hit', hit);
+  }
+});
+function endDrag(e, cancelled) {
+  if (!drag || e.pointerId !== drag.id) return;
+  var rect = canvas.getBoundingClientRect();
+  var d = drag; drag = null;
+  canvas.classList.remove('drag');
+  if (!cancelled && d.moved < 8 && performance.now() - d.t < 700) {
+    if (pickDog(e.clientX - rect.left, e.clientY - rect.top)) spawnWiggle();
+  }
+}
+canvas.addEventListener('pointerup', function (e) { endDrag(e, false); });
+canvas.addEventListener('pointercancel', function (e) { endDrag(e, true); });
+canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+function resize() {
+  var r = canvas.getBoundingClientRect();
+  cw = Math.max(1, r.width); chh = Math.max(1, r.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 2) * quality.scale;
+  var W = Math.max(1, Math.round(cw * dpr)), H = Math.max(1, Math.round(chh * dpr));
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+  aspect = cw / chh;
+  updateCamera();
+}
+if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
+window.addEventListener('resize', resize);
+window.addEventListener('hashchange', function () { applyHash(); });
+
+/* ===================================================================== */
+/*                                  Render                               */
+/* ===================================================================== */
+var dbg = { fur: 1 };
+var BG = srgb(0.815, 0.845, 0.865), GROUND = srgb(0.625, 0.685, 0.725);
+var fogA = 1.8, fogB = 3.5;
+function setCommon(P) {
+  var u = P.u;
+  gl.uniformMatrix4fv(u.uVP, false, VP);
+  gl.uniform3f(u.uCam, camEye[0], camEye[1], camEye[2]);
+}
+function setDogUniforms(P) {
+  var u = P.u;
+  gl.uniform4f(u.uA, ch.yaw, ch.roll, ch.pitch, ch.sq);
+  gl.uniform4f(u.uT, ch.tx, ch.ty, ch.tz, ch.lift);
+  gl.uniform4f(u.uB, ch.bodyX, ch.wAmp, ch.wPh, ch.wK);
+  gl.uniform4f(u.uC, ch.pawL, ch.pawR, ch.tailYaw, ch.tailPitch);
+  gl.uniformMatrix3fv(u.uR, true, Rm9); gl.uniformMatrix3fv(u.uRt, true, Rt9);
+  gl.uniform4f(u.uD, ch.breath, dbg.fur, quality.shells, 0);
+  gl.uniform3f(u.uJig, springs[3].s[0], springs[3].s[1], springs[3].s[2]);
+  gl.uniform3f(u.uLagL, springs[0].s[0], springs[0].s[1], springs[0].s[2]);
+  gl.uniform3f(u.uLagR, springs[1].s[0], springs[1].s[1], springs[1].s[2]);
+  gl.uniform3f(u.uLagT, springs[2].s[0], springs[2].s[1], springs[2].s[2]);
+  var V = dog.V;
+  gl.uniform3fv(u.uBase, V.base); gl.uniform3fv(u.uTipC, V.tipc); gl.uniform3fv(u.uDark, V.dark);
+  gl.uniform3fv(u.uTan, V.tan); gl.uniform3fv(u.uWhite, V.white);
+  gl.uniform1i(u.uMode, V.mode);
+  gl.uniform3ui(u.uSeedU, V.saltA, V.saltB, V.saltC);
+  gl.uniform1f(u.uDens, 48.0);
+  gl.uniform4f(u.uP, fogA, fogB, 0, 1);
+}
+
+function setGroundUniforms(P) {
+  var gu = P.u;
+  gl.uniform3fv(gu.uShC, shC); gl.uniform3fv(gu.uShR, shR); gl.uniform1fv(gu.uShW, shW);
+  gl.uniform3f(gu.uBg, Math.pow(BG[0], 1 / 2.2), Math.pow(BG[1], 1 / 2.2), Math.pow(BG[2], 1 / 2.2));
+  gl.uniform3f(gu.uGround, Math.pow(GROUND[0], 1 / 2.2), Math.pow(GROUND[1], 1 / 2.2), Math.pow(GROUND[2], 1 / 2.2));
+}
+
+function render() {
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(Math.pow(BG[0], 1 / 2.2), Math.pow(BG[1], 1 / 2.2), Math.pow(BG[2], 1 / 2.2), 1);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(true);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  // ground
+  gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE);
+  gl.useProgram(progGround.p);
+  var gu = progGround.u;
+  gl.uniformMatrix4fv(gu.uVP, false, VP);
+  setGroundUniforms(progGround);
+  gl.bindVertexArray(gvao);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  // dog base
+  gl.bindVertexArray(vao);
+  gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+  gl.disable(gl.BLEND);
+  gl.useProgram(progBase.p);
+  setCommon(progBase); setDogUniforms(progBase);
+  setGroundUniforms(progBase);
+  gl.drawElements(gl.TRIANGLES, NIDX, gl.UNSIGNED_INT, 0);
+  // fur shells
+  gl.depthMask(false);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(progShell.p);
+  setCommon(progShell); setDogUniforms(progShell);
+  if (dbg.fur > 0) gl.drawElementsInstanced(gl.TRIANGLES, NIDX, gl.UNSIGNED_INT, 0, quality.shells);
+  gl.depthMask(true);
+}
+
+var last = 0, accT = 0, frames = 0, emaDt = 1 / 60;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!last) last = now;
+  var dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  accT += dt;
+  var steps = 0;
+  while (accT >= 1 / 120 && steps < 8) { simStep(1 / 120); accT -= 1 / 120; steps++; }
+  if (steps === 8) accT = 0;
+  // camera smoothing
+  var kk = 1 - Math.exp(-dt * 16);
+  cam.az += (cam.tAz - cam.az) * kk;
+  cam.el += (cam.tEl - cam.el) * kk;
+  updateCamera();
+  updatePrims();
+  render();
+  // adaptive quality: only steps down when frames are clearly too slow (never on a fast GPU)
+  frames++;
+  if (frames > 40 && dt < 0.25) {
+    emaDt += (dt - emaDt) * 0.08;
+    if (frames % 24 === 0 && frames > qHold && emaDt > 0.024 && qLevel < QLEVELS.length - 1) {
+      qLevel++;
+      quality.shells = QLEVELS[qLevel][0];
+      if (QLEVELS[qLevel][1] !== quality.scale) { quality.scale = QLEVELS[qLevel][1]; resize(); }
+      qHold = frames + 40;
+      emaDt = 1 / 60;
+    }
+  }
+}
+var QLEVELS = [[34, 1], [26, 1], [20, 0.85], [14, 0.7], [10, 0.55]];
+var qLevel = 0, qHold = 0;
+
+window.__corgi = window.__corgi || {};
+window.__corgi.setView = function (azDeg, elDeg) {
+  cam.tAz = cam.az = azDeg * DEG; cam.tEl = cam.el = clamp(elDeg * DEG, EL_MIN, EL_MAX);
+};
+window.__corgi.click = function () { spawnWiggle(); };
+window.__corgi.spawn = function (name) { spawnWiggle(TYPES.indexOf(name)); };
+window.__corgi.pick = function (x, y) { return pickDog(x, y); };
+window.__corgi.quality = quality;
+window.__corgi.cam = cam;
+window.__corgi.ch = ch;
+window.__corgi.exc = function () { return exc; };
+window.__corgi.stats = { verts: NV, tris: NIDX / 3 };
+window.__corgi.prims = function () { return Array.prototype.slice.call(shC); };
+window.__corgi.bounds = function () {
+  var mn = [9, 9], mx = [-9, -9];
+  for (var i = 0; i < PRIMS.length; i++) {
+    if (i === 4) continue;
+    for (var k = 0; k < 26; k++) {
+      var dx = (k % 3) - 1, dy = (Math.floor(k / 3) % 3) - 1, dz = Math.floor(k / 9) - 1;
+      if (k >= 13) { dx = ((k + 1) % 3) - 1; dy = (Math.floor((k + 1) / 3) % 3) - 1; dz = Math.floor((k + 1) / 9) - 1; }
+      var l = Math.hypot(dx, dy, dz) || 1;
+      var wx = shC[i * 3] + dx / l * (shR[i * 3] + 0.3), wy = shC[i * 3 + 1] + dy / l * (shR[i * 3 + 1] + 0.3), wz = shC[i * 3 + 2] + dz / l * (shR[i * 3 + 2] + 0.3);
+      var cx = VP[0] * wx + VP[4] * wy + VP[8] * wz + VP[12], cy = VP[1] * wx + VP[5] * wy + VP[9] * wz + VP[13], cw2 = VP[3] * wx + VP[7] * wy + VP[11] * wz + VP[15];
+      var nx = cx / cw2, ny = cy / cw2;
+      mn[0] = Math.min(mn[0], nx); mn[1] = Math.min(mn[1], ny); mx[0] = Math.max(mx[0], nx); mx[1] = Math.max(mx[1], ny);
+    }
+  }
+  return [mn[0], mn[1], mx[0], mx[1]];
+};
+window.__corgi.dbg = dbg;
+
+applyHash();
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

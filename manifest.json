@@ -77,6 +77,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run. Effort label taken from the run folder name (haiku-5.5-high). Harness started in its own working folder; no other files were read. Checked in headless Chrome at 400x400 DPR 2 from file://: loads with no console errors; back, side, low and high views and click wiggles were viewed. Wall time, tokens and cost were not recorded."
+    },
+    {
+      "id": "sonnet-5-5-high-20261013",
+      "model": { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.296" },
+      "effort": "high",
+      "date": "2026-10-13",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/sonnet-5-5-high-20261013/index.html",
+      "sha256": "a326b794f0203c3058e127e2892de1e5b1c06754baa297ea4a520ea0c50e8ecf",
+      "three_version": null,
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run. Raw WebGL2, no Three.js or other external resource: SDF-meshed body with 34-shell fur, seeded sfc32 streams, 7 wiggle types, damped-spring fur lag. Self-checked in headless Chrome at 400x400 DPR 2 from file://: no console errors, seed/coat hash handling, click at canvas centre, orbit limits and wiggle bounds verified. About 4.8 ms GPU time/frame on an M4 (not measured on an M1); adaptive quality exists but did not trigger on the M4. The trunk fades into the ground colour, so straight-on front views show a soft fog window. The file keeps a few harmless window.__corgi debug hooks. The harness ran in a folder alongside other runs' folders; none were read. Wall time, tokens and cost were not recorded."
     }
   ]
 }
