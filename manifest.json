@@ -95,6 +95,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run. Raw WebGL2, no Three.js or other external resource: SDF-meshed body with 34-shell fur, seeded sfc32 streams, 7 wiggle types, damped-spring fur lag. Self-checked in headless Chrome at 400x400 DPR 2 from file://: no console errors, seed/coat hash handling, click at canvas centre, orbit limits and wiggle bounds verified. About 4.8 ms GPU time/frame on an M4 (not measured on an M1); adaptive quality exists but did not trigger on the M4. The trunk fades into the ground colour, so straight-on front views show a soft fog window. The file keeps a few harmless window.__corgi debug hooks. The harness ran in a folder alongside other runs' folders; none were read. Wall time, tokens and cost were not recorded."
+    },
+    {
+      "id": "opus-5-5-low-20261013",
+      "model": { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.296" },
+      "effort": "low",
+      "date": "2026-10-13",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/opus-5-5-low-20261013/index.html",
+      "sha256": "a9d86840f53592b521e51bf2b5027f5d0b2733c81bbe45657b84cac3170865c3",
+      "three_version": "0.160.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run. Three.js r160: surface-nets SDF body with 30 instanced fur shells, seeded mulberry32 sub-streams, 6 wiggle types, spring fur lag. Self-checked in headless Chrome at 400x400 DPR 2: no console errors. Not measured on an M1; adaptive quality exists. Hind legs largely hidden by the pants in side/low views. The final fur-lag tweak was not re-rendered before delivery. Keeps a window.__corgi debug hook. Wall time, tokens and cost were not recorded."
     }
   ]
 }
