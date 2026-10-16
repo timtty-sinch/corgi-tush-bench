@@ -113,6 +113,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run. Three.js r160: surface-nets SDF body with 30 instanced fur shells, seeded mulberry32 sub-streams, 6 wiggle types, spring fur lag. Self-checked in headless Chrome at 400x400 DPR 2: no console errors. Not measured on an M1; adaptive quality exists. Hind legs largely hidden by the pants in side/low views. The final fur-lag tweak was not re-rendered before delivery. Keeps a window.__corgi debug hook. Wall time, tokens and cost were not recorded."
+    },
+    {
+      "id": "gpt-6-20261016",
+      "model": { "id": "gpt-6", "name": "GPT-6", "provider": "OpenAI" },
+      "harness": { "name": "ChatGPT (free tier)", "version": null },
+      "effort": null,
+      "date": "2026-10-16",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": null,
+      "tokens": { "input": null, "output": null },
+      "cost_usd": null,
+      "file": "runs/gpt-6-20261016/index.html",
+      "sha256": "effcfcd31328d8f809e9b47aa091c6f26c22dbb602a074a9026e4c3e18778852",
+      "three_version": "0.160.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run in the ChatGPT web app on the free tier. The app does not show the exact model snapshot or thinking setting behind GPT-6, so effort is null. Delivered as corgi_rear_wiggle.html. Three.js r160: ellipsoid body with individual cone fur strands, seeded mulberry32 RNG. Checked in headless Chrome at 400x400 DPR 2 from file://: loads with no console errors, all four coats render distinctly from #seed/#coat, and a click at canvas centre triggers a wiggle. Wall time, tokens and cost were not recorded."
     }
   ]
 }
