@@ -16,6 +16,10 @@ python3 -m http.server 8000
 
 Then open http://localhost:8000. Voting and the leaderboard need the live site's server, so they don't work here.
 
+## Stills
+
+The site shows a still image of each entry and only starts its live render when you click it, one at a time. The stills live in `runs/<id>/stills/` (one per coat) and are captured by `scripts/stills.mjs` in headless Chromium. You don't need to make them for your entry: after a run is merged, the "Run stills" GitHub Action captures any that are missing and commits them. To make them yourself, run `npm install`, `npx playwright install chromium`, then `npm run stills` (add `-- --force` to recapture all).
+
 ## Voting
 
 The live site runs blind A/B votes and turns them into Elo ratings per prompt version. A pair must be on screen for 5 seconds before a vote counts, each pair gets one vote, and each IP gets 120 votes an hour (stored only as a salted hash). Run files are public, so a determined voter could work out which model is which. Treat the ratings as a fun crowd signal, not a lab result.
