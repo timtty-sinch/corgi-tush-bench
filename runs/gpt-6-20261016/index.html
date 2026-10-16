@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title></title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d9d0c1}canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+(() => {
+'use strict';
+const hash = new URLSearchParams(location.hash.slice(1));
+function hashInt(v){ if(v===null || !/^\d+$/.test(v)) return null; const n=Number(v); return Number.isSafeInteger(n)&&n>=0?n:null; }
+let seed=hashInt(hash.get('seed'));
+if(seed===null){const entropy=new Uint32Array(1);if(globalThis.crypto&&crypto.getRandomValues)crypto.getRandomValues(entropy);else entropy[0]=(Date.now() ^ (performance.now()*1000))>>>0;seed=entropy[0]>>>0;}
+let rngState=(seed>>>0)||0x6d2b79f5;
+function rand(){rngState=(rngState+0x6D2B79F5)|0;let t=rngState;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return ((t^(t>>>14))>>>0)/4294967296;}
+const coats=['red','sable','tri','bht'];
+const requested=hash.get('coat');
+const coat=coats.includes(requested)?requested:coats[Math.floor(rand()*coats.length)];
+const palettes={
+ red:{top:0xb65c2e,mid:0xc87942,dark:0x7b3d25,white:0xf4eee0,leg:0xf0e8d8,accent:0x9e4d2d},
+ sable:{top:0x9b6036,mid:0xb9824d,dark:0x49332b,white:0xf3eddf,leg:0xeee5d4,accent:0x74462e},
+ tri:{top:0x302a27,mid:0x594239,dark:0x17191a,white:0xf2ecdf,leg:0xeee5d5,accent:0xa95c37},
+ bht:{top:0x252526,mid:0x393437,dark:0x121314,white:0xf4eee2,leg:0xeee5d5,accent:0xb36b42}
+};
+const P=palettes[coat];
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xd9d0c1); scene.fog=new THREE.Fog(0xd9d0c1,7,17);
+const camera=new THREE.PerspectiveCamera(31,1,.1,50);
+let azimuth=0.0, elevation=0.45, radius=8.25;
+function placeCamera(){const ce=Math.cos(elevation);camera.position.set(Math.sin(azimuth)*ce*radius,Math.sin(elevation)*radius+0.55,-Math.cos(azimuth)*ce*radius);camera.lookAt(0,1.17,0);}
+placeCamera();
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2)); renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.15;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xfff4e6,0x82766a,2.0));
+const key=new THREE.DirectionalLight(0xffe6ca,3.1); key.position.set(-3.8,7,4.5); key.castShadow=true; key.shadow.mapSize.set(1024,1024); key.shadow.camera.left=-4;key.shadow.camera.right=4;key.shadow.camera.top=5;key.shadow.camera.bottom=-4;key.shadow.bias=-0.0003; scene.add(key);
+const fill=new THREE.DirectionalLight(0xd6e2ff,1.15);fill.position.set(4,3,-5);scene.add(fill);
+const groundMat=new THREE.MeshStandardMaterial({color:0xd8cfc0,roughness:1});
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),groundMat);ground.rotation.x=-Math.PI/2;ground.position.y=0;ground.receiveShadow=true;scene.add(ground);
+const mat=(color,roughness=.88)=>new THREE.MeshStandardMaterial({color,roughness});
+const topMat=mat(P.top), midMat=mat(P.mid), darkMat=mat(P.dark), whiteMat=mat(P.white), legMat=mat(P.leg), accentMat=mat(P.accent);
+const furMat=(c,rough=.94)=>new THREE.MeshStandardMaterial({color:c,roughness:rough});
+const bodyRoot=new THREE.Group();scene.add(bodyRoot); bodyRoot.position.y=0;
+const rump=new THREE.Group(); bodyRoot.add(rump); rump.position.set(0,1.36,-0.03);
+function ell(parent,scale,pos,material,rot=null){const m=new THREE.Mesh(new THREE.SphereGeometry(1,32,24),material);m.scale.set(...scale);m.position.set(...pos);if(rot)m.rotation.set(...rot);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;}
+// Long-backed torso enters from the front edge of frame and softly tapers into the rump.
+const torso=ell(bodyRoot,[0.69,0.66,1.55],[0,1.58,0.72],topMat,[0.03,0,0]);
+ell(bodyRoot,[0.64,0.56,1.18],[0,1.34,0.82],midMat);
+const torsoWhite=ell(bodyRoot,[0.51,0.33,1.03],[0,1.13,0.95],whiteMat,[0.02,0,0]);
+// A broad, rounded rump with subtle upper saddle and separate white breeches.
+ell(rump,[0.91,0.82,0.77],[0,0.02,-0.12],topMat);
+ell(rump,[0.78,0.69,0.70],[0,0.00,-0.18],midMat);
+if(coat==='tri'||coat==='bht'){
+  ell(rump,[0.78,0.45,0.69],[0,0.26,-0.14],darkMat);
+  ell(rump,[0.69,0.33,0.40],[0,0.43,0.23],darkMat);
+}
+// White fluffy pants: two lobes meet in a soft central cleft, rather than a flat white disk.
+const pants=new THREE.Group();rump.add(pants);
+ell(pants,[0.48,0.62,0.56],[-0.39,-0.19,-0.24],whiteMat,[0,0,-0.10]);
+ell(pants,[0.48,0.62,0.56],[0.39,-0.19,-0.24],whiteMat,[0,0,0.10]);
+ell(pants,[0.42,0.47,0.43],[0,-0.34,-0.37],whiteMat);
+// soft transition band
+ell(pants,[0.70,0.40,0.45],[0,-0.13,-0.04],whiteMat);
+// legs: short upper thighs, angled hocks, rounded paws; slight asymmetry for organic stance.
+const legs=[];
+for(let s of [-1,1]){
+ const leg=new THREE.Group(); bodyRoot.add(leg); leg.position.set(s*0.57,0.77,-0.34);
+ const thigh=ell(leg,[0.30,0.49,0.35],[s*0.015,-0.02,-0.03],whiteMat,[0,0,s*-0.12]);
+ const hock=ell(leg,[0.19,0.34,0.20],[s*0.025,-0.36,-0.04],legMat,[0,0,s*0.08]);
+ const shin=ell(leg,[0.17,0.27,0.19],[s*0.02,-0.56,0.035],legMat);
+ const paw=ell(leg,[0.26,0.15,0.29],[s*0.025,-0.73,0.12],legMat);
+ // toes are subtly separated, not cartoon fingers
+ for(let t=-1;t<=1;t++){
+   ell(leg,[0.075,0.075,0.12],[s*.025+t*.115,-.755,.31],legMat);
+ }
+ legs.push({group:leg,thigh,hock,shin,paw,side:s,baseX:leg.position.x,baseY:leg.position.y,baseZ:leg.position.z});
+}
+// tiny docked tail stub (usually naturally unobtrusive); attached at the rump root
+const tail=new THREE.Group();rump.add(tail);tail.position.set(0,0.29,-0.76);
+ell(tail,[0.18,0.16,0.24],[0,0,-0.06],topMat,[0.15,0,0]);
+// A small amount of coat-specific sable tipping gives the surface depth.
+if(coat==='sable'){
+  for(let i=0;i<95;i++){
+    const a=rand()*Math.PI*2, u=rand()*1.45-0.7;
+    const x=Math.sin(a)*Math.sqrt(Math.max(0,1-u*u))*.86, y=u*.72, z=Math.cos(a)*Math.sqrt(Math.max(0,1-u*u))*.72;
+    ell(rump,[.025,.025,.035],[x,y,z],darkMat);
+  }
+}
+// Procedural fur: thousands of tiny tapered fibers placed over ellipsoid surfaces.
+// A single instanced mesh per region keeps the scene light and coherent from every angle.
+const furGeo=new THREE.ConeGeometry(0.012,0.105,3,1);
+furGeo.translate(0,0.052,0);
+function addFur(parent, ellipsoid, count, colorSet, lengthScale=1, region='body'){
+ const [rx,ry,rz]=ellipsoid.scale.toArray(); const center=ellipsoid.position.clone();
+ const meshes=colorSet.map(c=>new THREE.InstancedMesh(furGeo,furMat(c),count));
+ meshes.forEach(m=>{m.castShadow=false;m.receiveShadow=false;parent.add(m);});
+ const dummy=new THREE.Object3D(); const normals=[];
+ for(let i=0;i<count;i++){
+   const y=rand()*2-1, a=rand()*Math.PI*2, q=Math.sqrt(1-y*y);
+   let n=new THREE.Vector3(q*Math.cos(a),y,q*Math.sin(a));
+   // bias pants fibers downward/outward for a fluffy feathered hem
+   let pos=new THREE.Vector3(n.x*rx,n.y*ry,n.z*rz);
+   if(region==='pants'){pos.y-=0.025+rand()*.09;pos.x*=1.015;}
+   if(region==='leg'){pos.y-=.025;}
+   const normal=new THREE.Vector3(n.x/rx,n.y/ry,n.z/rz).normalize();
+   let len=(region==='pants'?.105:.065)*(0.55+rand()*1.0)*lengthScale;
+   if(region==='pants' && rand()<.28)len*=1.45;
+   const idx=Math.min(colorSet.length-1,Math.floor(rand()*colorSet.length));
+   dummy.position.copy(center).add(pos).addScaledVector(normal,-.012);
+   // fur lies along the local surface normal with a slight gravity/downward comb
+   const direction=normal.clone().multiplyScalar(.82).add(new THREE.Vector3(n.x*.17,-.25,n.z*.17)).normalize();
+   dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction);
+   dummy.rotateY(rand()*Math.PI*2);
+   const r=.58+rand()*.82;
+   dummy.scale.set(r,len/.105,r);
+   dummy.updateMatrix();meshes[idx].setMatrixAt(i,dummy.matrix);
+ }
+ meshes.forEach(m=>{m.instanceMatrix.needsUpdate=true;});
+ return meshes;
+}
+addFur(rump, rump.children[0], 4300,[P.top,P.mid,P.accent,...(coat==='tri'||coat==='bht'?[P.dark]:[])],1,'body');
+// White fur on the pants is a dense coat of individual strands, especially at the silhouette.
+addFur(pants,pants.children[0],2100,[P.white,0xe8dfcf,0xfff8eb],1.45,'pants');
+addFur(pants,pants.children[1],2100,[P.white,0xe8dfcf,0xfff8eb],1.45,'pants');
+addFur(pants,pants.children[2],850,[P.white,0xe8dfcf],1.25,'pants');
+for(const L of legs){
+ addFur(L.group,L.thigh,430,[P.white,0xe8dfcf],.85,'leg');
+ addFur(L.group,L.hock,180,[P.leg,0xe6ddcd],.72,'leg');
+}
+// coat flecks along back to soften the body surface and avoid a polished plastic read
+addFur(bodyRoot,torso,3500,[P.top,P.mid,P.accent,...(coat==='tri'||coat==='bht'?[P.dark]:[])],.62,'body');
+// shadows under the dog are soft contact patches, while the directional light gives shape.
+const shadowMat=new THREE.MeshBasicMaterial({color:0x62564a,transparent:true,opacity:.11,depthWrite:false});
+for(const s of [-1,1]){const sh=new THREE.Mesh(new THREE.CircleGeometry(.52,32),shadowMat);sh.rotation.x=-Math.PI/2;sh.scale.set(1.1,.78,1);sh.position.set(s*.56,.006,-.28);scene.add(sh);}
+// camera drag/orbit; no zoom, clamped elevation, full horizontal rotation
+let dragging=false, moved=false, px=0,py=0,downX=0,downY=0;
+const canvas=renderer.domElement;
+canvas.addEventListener('pointerdown',e=>{dragging=true;moved=false;px=downX=e.clientX;py=downY=e.clientY;canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-px,dy=e.clientY-py;if(Math.abs(e.clientX-downX)+Math.abs(e.clientY-downY)>4)moved=true;azimuth-=dx*.008;elevation=THREE.MathUtils.clamp(elevation+dy*.006,THREE.MathUtils.degToRad(3),THREE.MathUtils.degToRad(70));px=e.clientX;py=e.clientY;placeCamera();});
+canvas.addEventListener('pointerup',e=>{dragging=false;if(!moved){const rect=canvas.getBoundingClientRect();const ndc=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1);raycaster.setFromCamera(ndc,camera);if(raycaster.intersectObjects(clickTargets,true).length)triggerWiggle();}});
+canvas.addEventListener('pointercancel',()=>dragging=false);
+const raycaster=new THREE.Raycaster();
+const clickTargets=[rump,torso,...legs.map(l=>l.group)];
+// Motion is a layered procedural impulse, not a canned animation. Each click selects a rhythm.
+let excitement=0, wiggle=null, lastClick=-10, clickCount=0;
+const patterns=[
+ {name:'happy',dur:1.45,f:10.5,amp:.18,lead:'rump'},
+ {name:'loaf',dur:2.35,f:4.3,amp:.27,lead:'pants'},
+ {name:'shimmy',dur:1.85,f:15.5,amp:.12,lead:'body'},
+ {name:'hop',dur:1.25,f:7.2,amp:.16,lead:'legs'},
+ {name:'double',dur:1.65,f:8.5,amp:.20,lead:'rump'}
+];
+function triggerWiggle(){
+ const now=clock.elapsedTime;
+ excitement=Math.min(1.65,excitement+.38);
+ let pick=Math.floor(rand()*patterns.length);
+ if(wiggle && patterns[pick].name===wiggle.name)pick=(pick+1+Math.floor(rand()*(patterns.length-1)))%patterns.length;
+ const p={...patterns[pick]};p.dur*=.82+rand()*.42;p.f*=.84+rand()*.36;p.amp*=.8+rand()*.5;p.phase=rand()*Math.PI*2;p.side=rand()<.5?-1:1;p.started=now;p.roll=rand()*.45;p.hop=rand();
+ wiggle=p;clickCount++;lastClick=now;
+}
+const clock=new THREE.Clock();
+let rumpSpring=0,rumpVel=0,pantsSpring=0,pantsVel=0,bodySpring=0,bodyVel=0;
+const baseLegRot=legs.map(l=>l.group.rotation.z);
+function smoothSpring(x,v,target,k,d,dt){const a=(target-x)*k-v*d;v+=a*dt;x+=v*dt;return [x,v];}
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.035),t=clock.elapsedTime;
+ excitement*=Math.exp(-dt*.72);
+ let targetR=Math.sin(t*1.8)*.018, targetP=Math.sin(t*1.65-0.8)*.012, targetB=Math.sin(t*1.4)*.008;
+ targetR+=Math.sin(t*.37+1.7)*.0035;targetP+=Math.sin(t*.29+4.1)*.0025;
+ let lift=0, twist=0, lean=0;
+ if(wiggle){
+   const u=(t-wiggle.started)/wiggle.dur;
+   if(u>=1)wiggle=null;
+   else{
+    const env=Math.pow(Math.sin(Math.PI*u),.62);
+    const phase=u*wiggle.f*2*Math.PI+wiggle.phase;
+    const amp=wiggle.amp*(1+excitement*.65)*env;
+    const wave=Math.sin(phase);
+    const secondary=Math.sin(phase*1.73+1.2);
+    targetR+=wave*amp*wiggle.side;
+    targetP+=secondary*amp*.55;
+    targetB+=Math.sin(phase*.68-.7)*amp*.28;
+    twist+=Math.sin(phase*.5)*amp*.32;
+    lean+=Math.cos(phase*1.13)*amp*.14;
+    if(wiggle.name==='hop'){lift=Math.pow(Math.max(0,Math.sin(Math.PI*u)),2)*.085*(1+excitement*.3);}
+    if(wiggle.name==='double')targetR+=Math.sin(phase*2.02)*amp*.28;
+   }
+ }
+ [rumpSpring,rumpVel]=smoothSpring(rumpSpring,rumpVel,targetR,46,8.4,dt);
+ [pantsSpring,pantsVel]=smoothSpring(pantsSpring,pantsVel,targetP+ rumpSpring*.38,38,7.0,dt);
+ [bodySpring,bodyVel]=smoothSpring(bodySpring,bodyVel,targetB,31,7.5,dt);
+ rump.rotation.y=rumpSpring+twist; rump.rotation.z=lean+Math.sin(t*1.5)*.006;
+ rump.position.y=1.36+Math.sin(t*2.1)*.012+lift;
+ pants.rotation.y=pantsSpring; pants.rotation.z=-lean*.45+Math.sin(t*9)*excitement*.012;
+ bodyRoot.rotation.y=bodySpring; bodyRoot.rotation.z=Math.sin(t*1.7)*.006+lean*.18;
+ for(let i=0;i<legs.length;i++){
+   const L=legs[i], side=L.side;
+   const planted=(wiggle&&wiggle.name==='hop'&&i===(wiggle.hop>.5?1:0))?lift*1.05:0;
+   L.group.position.y=L.baseY+planted;
+   L.group.rotation.z=side*(.006+Math.sin(t*1.6+i*2)*.012)+side*rumpSpring*.19;
+   L.group.rotation.y=side*rumpSpring*.10;
+ }
+ renderer.render(scene,camera);
+}
+function resize(){const w=canvas.clientWidth||innerWidth,h=canvas.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+new ResizeObserver(resize).observe(document.body);resize();
+animate();
+})();
+</script>
+</body>
+</html>
