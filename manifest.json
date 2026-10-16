@@ -116,7 +116,7 @@
     },
     {
       "id": "gpt-6-20261016",
-      "model": { "id": "gpt-6", "name": "GPT-6", "provider": "OpenAI" },
+      "model": { "id": "gpt-6", "name": "GPT-6 (free)", "provider": "OpenAI" },
       "harness": { "name": "ChatGPT (free tier)", "version": null },
       "effort": null,
       "date": "2026-10-16",
