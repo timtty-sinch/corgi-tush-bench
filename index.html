@@ -32,6 +32,7 @@
     --display:'Bricolage Grotesque',system-ui,sans-serif;
     --body:'Atkinson Hyperlegible',system-ui,sans-serif;
     --pane-w:min(400px, calc(100vw - 32px));
+    --page-w:1320px;     /* fits three 400px panes */
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -43,7 +44,7 @@
   button,select{font:inherit;color:inherit}
 
   /* Masthead */
-  .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px;padding:28px 24px 8px;max-width:1720px;margin:0 auto}
+  .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px;padding:28px 24px 8px;max-width:var(--page-w);margin:0 auto}
   .brand{margin:0;font:800 clamp(40px,7vw,84px)/.9 var(--display);letter-spacing:-.035em}
   .brand a{text-decoration:none}
   .lede{margin:12px 0 0;max-width:56ch;color:var(--muted)}
@@ -52,22 +53,30 @@
   nav.links a:hover,nav.links button:hover{color:var(--gold);text-decoration-color:var(--gold)}
 
   /* Controls */
-  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:16px 24px;max-width:1720px;margin:0 auto}
+  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:16px 24px;max-width:var(--page-w);margin:0 auto}
   .group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
   .group > span{color:var(--muted);margin-right:4px}
   .chip{background:transparent;border:1.5px solid var(--line);border-radius:999px;padding:5px 13px;cursor:pointer}
   .chip:hover{border-color:var(--muted)}
   .chip[aria-pressed=true]{background:var(--gold);border-color:var(--gold);color:var(--band-ink);font-weight:700}
-  .hint{color:var(--muted);font-size:14px;margin-left:auto}
 
-  /* Strip of entries */
-  .strip{display:flex;gap:24px;overflow-x:auto;scroll-snap-type:x mandatory;padding:12px 24px 28px;scroll-padding:0 24px}
-  .strip.grid{flex-wrap:wrap;justify-content:center;overflow:visible}
-  .entry{flex:0 0 var(--pane-w);scroll-snap-align:start;margin:0}
+  /* All entries: three across, two on tablets, one on phones */
+  .gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px 24px;max-width:var(--page-w);margin:0 auto;padding:12px 24px 40px}
+  @media (max-width:1100px){.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media (max-width:700px){.gallery{grid-template-columns:minmax(0,1fr)}}
+  .gallery .stage{width:100%}
+
+  /* Compare and vote: panes side by side, wrapping */
+  .strip{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;padding:12px 24px 28px}
+  .entry{flex:0 0 var(--pane-w);margin:0}
+  .gallery .entry{flex:none}
   .stage{position:relative;width:var(--pane-w);aspect-ratio:1;border-radius:16px;overflow:hidden;background:var(--pane)}
   .stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
   .stage .load{position:absolute;inset:0;display:grid;place-items:center;width:100%;border:0;background:var(--pane);color:#5b5146;cursor:pointer;font-weight:700}
   .stage .load:hover{color:#2b241d}
+  .stage .load img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .stage .play{position:absolute;right:12px;bottom:12px;background:var(--band);color:var(--band-ink);border-radius:999px;padding:5px 14px 6px;font-size:14px;box-shadow:0 1px 0 rgba(28,37,56,.25)}
+  .stage .load:hover .play,.stage .load:focus-visible .play{background:var(--gold)}
   .armband{position:absolute;top:12px;left:12px;z-index:2;background:var(--band);color:var(--band-ink);border-radius:4px;padding:2px 10px 3px;font:800 22px/1.1 var(--display);letter-spacing:-.02em;box-shadow:0 1px 0 rgba(28,37,56,.25);pointer-events:none}
   .caption{padding:12px 2px 0}
   .caption h2{margin:0;font:800 22px/1.15 var(--display);letter-spacing:-.015em}
@@ -103,7 +112,7 @@
 
   /* Vote */
   .vote{padding:4px 0 32px}
-  .vote-head{max-width:1720px;margin:0 auto;padding:0 24px;text-align:center}
+  .vote-head{max-width:var(--page-w);margin:0 auto;padding:0 24px;text-align:center}
   .vote-head p{margin-left:auto!important;margin-right:auto!important}
   .vote-head h2,.board h2{margin:0;font:800 clamp(28px,4vw,44px)/1.05 var(--display);letter-spacing:-.025em}
   .vote-head p,.board .sub{margin:8px 0 0;color:var(--muted);max-width:62ch}
@@ -128,7 +137,7 @@
   .prov{color:var(--muted);font-size:13px;margin-left:6px}
   .board .after{display:flex;gap:16px;align-items:center;margin-top:24px}
 
-  footer{padding:24px;color:var(--muted);font-size:14px;max-width:1720px;margin:0 auto;border-top:1px solid var(--line)}
+  footer{padding:24px;color:var(--muted);font-size:14px;max-width:var(--page-w);margin:0 auto;border-top:1px solid var(--line)}
   footer a{color:var(--muted)}
 
   /* Prompt dialog */
@@ -160,7 +169,6 @@
     <!-- filled by script -->
   </div>
   <div class="group" role="group" aria-label="Prompt version" id="versions"></div>
-  <span class="hint" id="hint">Scroll sideways for more entries</span>
 </div>
 
 <main id="main"></main>
@@ -172,7 +180,7 @@
 </div>
 
 <footer>
-  Entries are the models' files exactly as delivered, unedited. Each file's hash is in <a href="manifest.json">manifest.json</a>. Up to four entries run live at once; the rest load as you scroll to them.
+  Entries are the models' files exactly as delivered, unedited. Each file's hash is in <a href="manifest.json">manifest.json</a>. Each entry shows a still until you click it; one runs live at a time.
 </footer>
 
 <dialog id="prompt-dlg" aria-labelledby="prompt-title">
@@ -190,8 +198,9 @@
 /* Where run files are served from. The deploy fills this in for production with a separate
    origin, so model-written code never shares the site's origin. Locally it stays same-folder. */
 const RUNS_ORIGIN = '__RUNS_ORIGIN__'.startsWith('__') ? '' : '__RUNS_ORIGIN__';
-const MAX_LIVE = 4;
+const MAX_LIVE = 4; // compare and vote views, which run their entries side by side
 const MAX_COMPARE = 4;
+const STILL_SEED = '1'; // the seed scripts/stills.mjs captures with (its SEED), so a still and its live render match
 const COATS = [['random', 'Random'], ['red', 'Red and white'], ['sable', 'Sable'], ['tri', 'Tricolor'], ['bht', 'Black-headed tricolor']];
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -209,9 +218,10 @@ const h = (tag, attrs = {}, ...kids) => {
 
 let manifest, runs = [];
 const q = new URLSearchParams(location.search);
+const seedInUrl = /^\d+$/.test(q.get('seed') || '');
 const state = {
   coat: COATS.some(c => c[0] === q.get('coat')) ? q.get('coat') : 'random',
-  seed: /^\d+$/.test(q.get('seed') || '') ? q.get('seed') : String(Math.floor(Math.random() * 1e6)),
+  seed: seedInUrl ? q.get('seed') : String(Math.floor(Math.random() * 1e6)),
   version: q.get('v') || 'all',
   compare: (q.get('compare') || '').split(',').filter(Boolean),
   run: q.get('run'),
@@ -229,7 +239,8 @@ function syncUrl() {
   else if (state.compare.length) p.set('compare', state.compare.join(','));
   else if (state.version !== 'all') p.set('v', state.version);
   if (state.coat !== 'random') p.set('coat', state.coat);
-  if (state.run || state.compare.length) p.set('seed', state.seed);
+  if (state.run) p.set('seed', seedInUrl ? state.seed : STILL_SEED);
+  else if (state.compare.length) p.set('seed', state.seed);
   const s = p.toString();
   history.replaceState(null, '', s ? '?' + s : location.pathname);
 }
@@ -242,6 +253,26 @@ function srcFor(run, coat = state.coat, seed = state.seed) {
   if (run.params.seed) parts.push('seed=' + seed);
   if (coat !== 'random' && run.params.coat && run.params.coat[coat]) parts.push('coat=' + run.params.coat[coat]);
   return RUNS_ORIGIN + run.file + (parts.length ? '#' + parts.join('&') : '');
+}
+
+/* The still image captured from a run by scripts/stills.mjs, in the chosen coat. */
+function stillFor(run, coat = state.coat) {
+  const name = coat !== 'random' && run.params.coat && run.params.coat[coat] ? coat : 'default';
+  return RUNS_ORIGIN + run.file.replace(/index\.html$/, 'stills/' + name + '.jpg');
+}
+
+function refreshStills() {
+  document.querySelectorAll('.stage img.still').forEach(img => {
+    img.hidden = false;
+    img.src = stillFor(img.closest('.stage')._run);
+  });
+}
+
+/* Swap a still for its live render, stopping any other live render first so only one plays at a time. */
+function play(stage) {
+  [...live].filter(s => s !== stage).forEach(s => unload(s));
+  load(stage);
+  stage.querySelector('iframe').focus();
 }
 
 function load(stage) {
@@ -265,23 +296,22 @@ function unload(stage, quiet) {
 
 function reloadLive() { [...live].forEach(load); }
 
-const io = new IntersectionObserver(entries => {
-  for (const e of entries) {
-    const stage = e.target;
-    if (e.intersectionRatio >= 0.55 && !live.includes(stage)) load(stage);
-    else if (e.intersectionRatio === 0 && live.includes(stage)) unload(stage);
-  }
-}, { threshold: [0, 0.55] });
-
 /* ---------- building blocks ---------- */
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const entryNo = run => runs.indexOf(run) + 1;
 
-function stageFor(run, { observe = true } = {}) {
-  const ph = h('button', { class: 'load', type: 'button', text: 'Load live render', onclick: () => load(stage) });
+/* A pane for one run. By default it shows the run's still and plays live when clicked;
+   with autoplay it goes straight to the live render. */
+function stageFor(run, { autoplay = false } = {}) {
+  // If the still is missing (a new run before its stills are captured), the button falls back to its text.
+  const img = h('img', { class: 'still', src: stillFor(run), alt: '', onerror: e => (e.target.hidden = true) });
+  const ph = h('button', { class: 'load', type: 'button', 'aria-label': 'Play ' + run.model.name + ' live', onclick: () => play(stage) },
+    'Load live render', img, h('span', { class: 'play', 'aria-hidden': 'true', text: '\u25B6 Play live' }));
   const stage = h('div', { class: 'stage' }, h('span', { class: 'armband', 'aria-label': 'Entry ' + entryNo(run), text: entryNo(run) }), ph);
   stage._run = run; stage._placeholder = ph;
-  if (observe) io.observe(stage); else queueMicrotask(() => load(stage));
+  // A pane that starts as a still plays with the still's seed, unless the link asked for a seed.
+  if (!autoplay && !seedInUrl) stage._seed = STILL_SEED;
+  if (autoplay) queueMicrotask(() => load(stage));
   return stage;
 }
 
@@ -309,9 +339,8 @@ function facts(run, full) {
 /* ---------- views ---------- */
 function viewStrip() {
   const shown = runs.filter(r => state.version === 'all' || r.prompt_version === state.version);
-  $('#hint').hidden = false;
   if (!shown.length) return h('p', { class: 'empty', text: 'No entries for this prompt version yet.' });
-  return h('div', { class: 'strip', tabindex: 0, 'aria-label': 'Entries' }, shown.map(run =>
+  return h('div', { class: 'gallery', 'aria-label': 'Entries' }, shown.map(run =>
     h('figure', { class: 'entry' },
       stageFor(run),
       h('figcaption', { class: 'caption' },
@@ -329,7 +358,6 @@ function viewStrip() {
 }
 
 function viewCompare() {
-  $('#hint').hidden = true;
   const chosen = state.compare.map(id => runs.find(r => r.id === id)).filter(Boolean);
   const others = runs.filter(r => !chosen.includes(r));
   const add = chosen.length < MAX_COMPARE && others.length ? h('figure', { class: 'entry' },
@@ -345,9 +373,9 @@ function viewCompare() {
   const mixed = new Set(chosen.map(r => r.prompt_version)).size > 1;
   return h('div', {},
     mixed ? h('p', { class: 'empty', style: 'padding:0 24px 8px;margin:0', text: 'These entries answered different prompt versions, so they aren’t a like-for-like comparison.' }) : null,
-    h('div', { class: 'strip grid' },
+    h('div', { class: 'strip' },
       chosen.map(run => h('figure', { class: 'entry' },
-        stageFor(run, { observe: false }),
+        stageFor(run, { autoplay: true }),
         h('figcaption', { class: 'caption' },
           h('h2', {}, h('a', { href: '?run=' + encodeURIComponent(run.id), text: run.model.name })),
           facts(run),
@@ -363,12 +391,11 @@ function viewCompare() {
 }
 
 function viewRun() {
-  $('#hint').hidden = true;
   const run = runs.find(r => r.id === state.run);
   if (!run) return h('p', { class: 'empty' }, 'There’s no entry called “', state.run, '”. ', h('a', { href: './', text: 'See all entries' }), '.');
   document.title = run.model.name + ' on Corgi Tush Bench';
   return h('section', { class: 'run' },
-    h('div', {}, stageFor(run, { observe: false })),
+    h('div', {}, stageFor(run)),
     h('div', { class: 'details' },
       h('h2', { text: run.model.name }),
       h('div', { style: 'color:var(--muted)', text: 'Entry ' + entryNo(run) }),
@@ -411,7 +438,6 @@ function anonStage(side, label, coat, seed) {
 }
 
 async function viewVote() {
-  $('#hint').hidden = true;
   let m;
   try { m = await api('/api/match' + (state.version !== 'all' ? '?v=' + encodeURIComponent(state.version) : '')); }
   catch (e) { return h('p', { class: 'empty', text: e.message }); }
@@ -451,12 +477,11 @@ async function viewVote() {
     h('div', { class: 'vote-head' },
       h('h2', { text: 'Which corgi wiggles better?' }),
       h('p', { text: `Drag to walk around each one and click to make it wiggle. Both wear the ${coatName(m.coat).toLowerCase()} coat. Names stay hidden until you vote. Prompt ${m.prompt_version}.` })),
-    h('div', { class: 'strip grid' }, pane('left'), pane('right')),
+    h('div', { class: 'strip' }, pane('left'), pane('right')),
     h('div', { class: 'vote-bar' }, buttons, next, board, status));
 }
 
 async function viewBoard() {
-  $('#hint').hidden = true;
   let d;
   try { d = await api('/api/leaderboard' + (state.version !== 'all' ? '?v=' + encodeURIComponent(state.version) : '')); }
   catch (e) { return h('p', { class: 'empty', text: e.message }); }
@@ -496,7 +521,7 @@ function controls() {
   coats.querySelectorAll('.chip').forEach(b => b.remove());
   for (const [id, label] of COATS) coats.append(h('button', {
     class: 'chip', type: 'button', 'aria-pressed': String(state.coat === id), text: label,
-    onclick: () => { state.coat = id; controls(); syncUrl(); reloadLive(); },
+    onclick: () => { state.coat = id; controls(); syncUrl(); refreshStills(); reloadLive(); },
   }));
   const vs = $('#versions');
   vs.replaceChildren();
@@ -513,7 +538,6 @@ let routeId = 0;
 async function route() {
   const id = ++routeId;
   [...live].forEach(s => unload(s));
-  io.disconnect();
   document.title = state.mode === 'vote' ? 'Vote, Corgi Tush Bench' : state.mode === 'board' ? 'Leaderboard, Corgi Tush Bench' : 'Corgi Tush Bench';
   const pending = state.mode === 'vote' ? viewVote() : state.mode === 'board' ? viewBoard()
     : state.run ? viewRun() : state.compare.length ? viewCompare() : viewStrip();
