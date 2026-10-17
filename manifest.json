@@ -149,6 +149,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run in Claude Code 2.1.302 with /effort high; prompt verified byte-identical to prompts/v1.md. Delivered as corgi.html. Three.js r160: surface-nets SDF body with skinned IK legs, 36 instanced fur shells (18 inner on the whole body, 18 outer only on long fur), seeded sfc32 sub-streams, 7 wiggle types with excitement build-up, spring jiggle on pants/rump/belly. The cropped front is drawn first and faded as a unit, with the rear composited over or under it depending on camera side, so it dissolves without a hard edge from any angle. Self-checked in headless Chrome at 400x400 DPR 2 on an Apple M4: no console errors, about 5.5 ms GPU per frame and no dropped frames during repeated wiggles; not measured on an M1. Keeps a window.corgi hook (seed, coat, last, wiggle, view, quality). Wall time is first prompt to final reply from the session transcript. Tokens are summed from the transcript's per-message usage; input includes cache reads (30,977,891) and cache writes (368,028). Cost was not reported by the harness."
+    },
+    {
+      "id": "opus-5-5-xhigh-20261017",
+      "model": { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.302" },
+      "effort": "xhigh",
+      "date": "2026-10-17",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": 54,
+      "tokens": { "input": 26167762, "output": 279786 },
+      "cost_usd": null,
+      "file": "runs/opus-5-5-xhigh-20261017/index.html",
+      "sha256": "b0481d1a21f600458cdf38def8dd84eb5e3d08c75b285f1008c5cd92ace38d39",
+      "three_version": "0.170.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run, prompt pasted verbatim. Model, effort and harness version are taken from the Claude Code session log. The harness started in its own run folder, and the model read no files there except its own. The claude.ai usage limit paused the run after 52 minutes; it resumed on its own about 2 hours later and the model delivered 2 minutes after that. wall_min counts model working time only and leaves out the pause. Three.js r170: surface-nets SDF rump with up to 86 instanced fur shells in three sets, seeded sfc32 sub-streams, 7 wiggle types and spring fur lag. The body fades out toward mid-back, so a straight-on front view shows the faded front as a smooth disc. After delivery the operator sent \"finish it\" and the model kept editing; under the one-attempt rule that later version is not this entry. Tokens are summed over the 92 API requests in the session log. The input figure includes 25,498,597 cache-read and 668,979 cache-write tokens. There is no USD cost because the run used a claude.ai subscription. Checked in headless Chrome at 400x400 DPR 2 from file://: all four coats load with no console output, and a click at the canvas centre starts a wiggle. About 5 ms GPU time per frame on an M4; not measured on an M1. Adaptive quality steps down only when the median frame time is over 40 ms, so it did not trigger on the M4."
     }
   ]
 }

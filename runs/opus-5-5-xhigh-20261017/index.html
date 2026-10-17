@@ -1,0 +1,1355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Corgi Loaf</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#d3c6b4}
+  canvas{display:block;width:100%;height:100%;touch-action:none;-webkit-tap-highlight-color:transparent;cursor:grab;outline:none;user-select:none}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+/* =====================================================================
+   Parameters (#seed=1234&coat=sable) and the single seeded RNG
+   ===================================================================== */
+const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+let seedStr = null;
+{
+  const s = (hashParams.get('seed') || '').trim();
+  if (/^\d+$/.test(s)) seedStr = BigInt(s).toString();
+}
+if (seedStr === null) {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  seedStr = String(a[0]);
+}
+const COATS = ['red', 'sable', 'tri', 'bht'];
+let coatParam = (hashParams.get('coat') || '').trim().toLowerCase();
+if (!COATS.includes(coatParam)) coatParam = null;
+
+function cyrb128(str) {
+  let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
+  for (let i = 0; i < str.length; i++) {
+    const k = str.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  return [(h1 ^ h2 ^ h3 ^ h4) >>> 0, (h2 ^ h1) >>> 0, (h3 ^ h1) >>> 0, (h4 ^ h1) >>> 0];
+}
+function sfc32(a, b, c, d) {
+  return function () {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+    let t = (a + b) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    d = (d + 1) | 0;
+    t = (t + d) | 0;
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+// One master generator; every consumer gets its own stream forked from it in a fixed
+// order, so e.g. the wiggle sequence depends only on the seed and the click count.
+const master = sfc32(...cyrb128('pembroke:' + seedStr));
+for (let i = 0; i < 16; i++) master();
+const fork = () => sfc32(master() * 4294967296 >>> 0, master() * 4294967296 >>> 0,
+                         master() * 4294967296 >>> 0, master() * 4294967296 >>> 0);
+const rngCoat = fork(), rngFur = fork(), rngWiggle = fork(), rngIdle = fork();
+
+/* =====================================================================
+   Small math helpers
+   ===================================================================== */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const lerp = (a, b, t) => a + (b - a) * t;
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const gauss = (x, y, z, cx, cy, cz, sx, sy, sz) => {
+  const a = (x - cx) / sx, b = (y - cy) / sy, c = (z - cz) / sz;
+  return Math.exp(-(a * a + b * b + c * c));
+};
+function makeNoise(rng) {
+  const P = new Uint16Array(512), G = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { P[i] = i; G[i] = rng() * 2 - 1; }
+  for (let i = 255; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = P[i]; P[i] = P[j]; P[j] = t; }
+  for (let i = 0; i < 256; i++) P[i + 256] = P[i];
+  const f = t => t * t * (3 - 2 * t);
+  return (x, y, z) => {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    const u = f(x - xi), v = f(y - yi), w = f(z - zi);
+    const X = xi & 255, Y = yi & 255, Z = zi & 255;
+    const h = (a, b, c) => G[P[P[P[a] + b] + c]];
+    const x00 = lerp(h(X, Y, Z), h(X + 1, Y, Z), u), x10 = lerp(h(X, Y + 1, Z), h(X + 1, Y + 1, Z), u);
+    const x01 = lerp(h(X, Y, Z + 1), h(X + 1, Y, Z + 1), u), x11 = lerp(h(X, Y + 1, Z + 1), h(X + 1, Y + 1, Z + 1), u);
+    return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w);
+  };
+}
+
+/* =====================================================================
+   Body shape: signed distance field of the rear half (rest pose).
+   Metres, ground at y = 0, dog faces -z, tail end towards +z.
+   ===================================================================== */
+const LEG = {
+  hip: [0.056, 0.172, -0.038],
+  stf: [0.066, 0.107, -0.067],
+  hock: [0.064, 0.050, -0.009],
+  paw: [0.067, 0.014, -0.040],
+  toe: [0.067, 0.010, -0.068],
+};
+const TAIL0 = [0, 0.232, 0.03], TAIL1 = [0, 0.238, 0.05];
+const TOES = [[-0.0135, -0.0565], [-0.0047, -0.063], [0.0047, -0.063], [0.0135, -0.0565]];
+
+function smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+function sph(px, py, pz, cx, cy, cz, r) { const x = px - cx, y = py - cy, z = pz - cz; return Math.sqrt(x * x + y * y + z * z) - r; }
+function ell(px, py, pz, cx, cy, cz, rx, ry, rz) {
+  const x = (px - cx) / rx, y = (py - cy) / ry, z = (pz - cz) / rz;
+  const k0 = Math.sqrt(x * x + y * y + z * z);
+  const x1 = x / rx, y1 = y / ry, z1 = z / rz;
+  const k1 = Math.sqrt(x1 * x1 + y1 * y1 + z1 * z1);
+  return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(rx, ry, rz);
+}
+function tcap(px, py, pz, ax, ay, az, bx, by, bz, ra, rb) {
+  const bax = bx - ax, bay = by - ay, baz = bz - az, pax = px - ax, pay = py - ay, paz = pz - az;
+  let t = (pax * bax + pay * bay + paz * baz) / (bax * bax + bay * bay + baz * baz);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const dx = pax - bax * t, dy = pay - bay * t, dz = paz - baz * t;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) - (ra + (rb - ra) * t);
+}
+let sdfWithTail = true;   // the stub is left out when baking occlusion, so it casts no dark patch
+function sdf(x, y, z) {
+  const ax = x < 0 ? -x : x;
+  // barrel of the torso: wide ribs tapering to the loin, belly tucking up towards the hind legs.
+  // The chest end is rounded off near z = -0.37 and faded out in the shader.
+  let t = (z + 0.29) / 0.24; t = t < 0 ? 0 : t > 1 ? 1 : t;
+  // towards the (faded) chest the barrel narrows from below and the sides, keeping the topline level,
+  // so that from the front the fade spreads over a visible slope instead of a hard rim
+  const tp = sstep(-0.12, -0.33, z);
+  const rx0 = 0.093 - 0.014 * (t - 0.0833) / 0.9167, ry0 = 0.082 - 0.012 * t;
+  const rx = rx0 * (1 - 0.62 * tp), ry = ry0 * (1 - 0.52 * tp);
+  const cy = 0.187 + 0.007 * t + (ry0 - ry) * 0.6, zc = -0.29 + 0.24 * t;
+  const rz = 0.5 * (rx + ry);
+  const qx = x / rx, qy = (y - cy) / ry, qz = (z - zc) / rz;
+  let d = (Math.sqrt(qx * qx + qy * qy + qz * qz) - 1) * Math.min(rx, ry);
+  // rump: two cheeks with a soft dorsal groove between them, domed on top
+  const cL = ell(x, y, z, 0.036, 0.177, -0.014, 0.057, 0.085, 0.076);
+  const cR = ell(x, y, z, -0.036, 0.177, -0.014, 0.057, 0.085, 0.076);
+  d = smin(d, smin(cL, cR, 0.04), 0.055);
+  // britches: the round back of the thighs, with a cleft between them
+  const pL = ell(x, y, z, 0.043, 0.132, 0.018, 0.049, 0.066, 0.046);
+  const pR = ell(x, y, z, -0.043, 0.132, 0.018, 0.049, 0.066, 0.046);
+  d = smin(d, smin(pL, pR, 0.012), 0.03);
+  // hind legs (mirrored; they never reach the midline)
+  d = smin(d, tcap(ax, y, z, 0.054, 0.155, -0.035, 0.066, 0.107, -0.067, 0.05, 0.027), 0.045);
+  d = smin(d, tcap(ax, y, z, 0.066, 0.107, -0.067, 0.064, 0.050, -0.009, 0.025, 0.0158), 0.025);
+  d = smin(d, sph(ax, y, z, 0.064, 0.053, 0.002, 0.0118), 0.012);
+  d = smin(d, tcap(ax, y, z, 0.064, 0.050, -0.009, 0.066, 0.021, -0.019, 0.0158, 0.015), 0.012);
+  let pw = ell(ax, y, z, 0.067, 0.0155, -0.039, 0.0212, 0.0165, 0.0265);
+  for (let i = 0; i < 4; i++) pw = smin(pw, sph(ax, y, z, 0.067 + TOES[i][0], 0.0102, TOES[i][1], 0.0094), 0.006);
+  d = smin(d, pw, 0.012);
+  // docked tail stub
+  if (sdfWithTail) d = smin(d, tcap(x, y, z, TAIL0[0], TAIL0[1], TAIL0[2], TAIL1[0], TAIL1[1], TAIL1[2], 0.013, 0.01), 0.028);
+  // flat pads on the ground plane
+  return Math.max(d, -y);
+}
+const sdfGrad = (x, y, z, out) => {
+  const e = 0.0007;
+  const a = sdf(x + e, y - e, z - e), b = sdf(x - e, y - e, z + e), c = sdf(x - e, y + e, z - e), d = sdf(x + e, y + e, z + e);
+  out[0] = a - b - c + d; out[1] = -a - b + c + d; out[2] = -a + b - c + d;
+  const l = Math.hypot(out[0], out[1], out[2]) || 1;
+  out[0] /= l; out[1] /= l; out[2] /= l;
+};
+
+/* =====================================================================
+   Coat: colour choice + markings
+   ===================================================================== */
+const coatPick = rngCoat();
+let coat = coatPick < 0.42 ? 'red' : coatPick < 0.62 ? 'sable' : coatPick < 0.82 ? 'tri' : 'bht';
+if (coatParam) coat = coatParam;
+const cv = {
+  hue: rngCoat(), pantsTop: rngCoat(), heartDip: rngCoat(), legTop: rngCoat(), cream: rngCoat(),
+  saddleLow: rngCoat(), saddleEnd: rngCoat(), sable: rngCoat(), tanW: rngCoat(), fluff: rngCoat(),
+  shade: rngCoat(), whiteTint: rngCoat(),
+};
+const noiseA = makeNoise(rngCoat), noiseB = makeNoise(rngCoat), noiseC = makeNoise(rngCoat);
+
+const srgb2lin = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const rgb = (r, g, b) => new THREE.Vector3(srgb2lin(r / 255), srgb2lin(g / 255), srgb2lin(b / 255));
+const mixv = (a, b, t) => a.clone().lerp(b, t);
+const PAL = (() => {
+  const h = cv.hue;
+  const redLight = rgb(204, 140, 88), redMid = rgb(186, 110, 62), redDeep = rgb(160, 86, 46);
+  const red = h < 0.5 ? mixv(redLight, redMid, h * 2) : mixv(redMid, redDeep, h * 2 - 1);
+  const white = mixv(rgb(244, 240, 233), rgb(240, 233, 220), cv.whiteTint);
+  const cream = mixv(rgb(236, 218, 188), rgb(226, 196, 152), cv.shade);
+  const black = rgb(26, 23, 22);
+  const p = { red, tan: red.clone(), white, cream, black, tip: rgb(48, 32, 22), pad: rgb(44, 38, 37), sable: 1 };
+  if (coat === 'sable') { p.red = mixv(rgb(202, 140, 86), rgb(182, 116, 64), cv.hue); p.tip = mixv(rgb(52, 34, 24), rgb(34, 24, 18), cv.shade); }
+  if (coat === 'tri') { p.red = mixv(rgb(188, 114, 64), rgb(170, 96, 52), cv.hue); p.tan = p.red.clone(); p.sable = 0; }
+  if (coat === 'bht') { p.red = mixv(rgb(184, 116, 66), rgb(162, 96, 52), cv.hue); p.tan = p.red.clone(); p.black = rgb(22, 20, 20); p.sable = 0; }
+  return p;
+})();
+
+// returns [white, dark, tan, cream] for a rest-pose surface point
+function coatMasks(x, y, z, nx, ny, nz) {
+  const ax = Math.abs(x), sg = x >= 0 ? 1 : -1;
+  const n1 = noiseA(x * 34, y * 34, z * 34) * 0.65 + noiseA(x * 85 + 11, y * 85, z * 85) * 0.35;
+  const n2 = noiseB(x * 26, y * 26, z * 26) * 0.7 + noiseB(x * 70 + 5, y * 70, z * 70) * 0.3;
+  const inward = clamp(-nx * sg, 0, 1);
+  // britches: heart-shaped white patch on the back of the thighs
+  const top0 = 0.168 + 0.045 * cv.pantsTop;
+  const pTop = (expand) => top0 + expand - 11 * Math.max(ax - 0.035, 0) ** 2 - (0.004 + 0.024 * cv.heartDip) * Math.exp(-((x / 0.02) ** 2));
+  const back = sstep(-0.2, 0.45, nz) * sstep(-0.075, -0.015, z + n2 * 0.01);
+  const pantsAt = e => sstep(pTop(e) + 0.012, pTop(e) - 0.012, y + n1 * 0.017) * back;
+  // legs: white socks, higher on the back and inside of the leg
+  const legTop = e => 0.06 + 0.055 * Math.max(inward, sstep(-0.2, 0.6, nz)) + (cv.legTop - 0.5) * 0.026 + e;
+  const legAt = e => sstep(legTop(e) + 0.011, legTop(e) - 0.011, y + n1 * 0.011) * sstep(0.02, 0.045, ax);
+  const belly = sstep(-0.12, -0.55, ny) * sstep(0.168, 0.13, y + n1 * 0.01);
+  const inner = sstep(0.05, 0.55, inward) * sstep(0.15, 0.115, y + n1 * 0.008) * sstep(-0.13, -0.06, z);
+  const white = Math.max(pantsAt(0), legAt(0), belly, inner);
+  let dark = 0, tan = 0, cream = 0;
+  if (coat === 'red') {
+    dark = 0.14 * sstep(0.2, 0.26, y + n2 * 0.02) * sstep(0.0, -0.06, z) * (1 - white);
+    cream = (0.15 + 0.6 * cv.cream) * sstep(0.08, 0.16, y) * back;
+  } else if (coat === 'sable') {
+    const top = sstep(0.13, 0.22, y + n2 * 0.03) * (0.6 + 0.4 * sstep(0.2, 0.265, y)) * (1 - 0.35 * sstep(0.0, 0.05, z));
+    const thigh = 0.4 * sstep(0.1, 0.17, y) * sstep(0.3, 0.8, Math.abs(nx));
+    dark = clamp((Math.max(top, thigh)) * (0.75 + 0.25 * cv.sable) * (1 - white), 0, 1);
+    cream = (0.1 + 0.5 * cv.cream) * sstep(0.08, 0.16, y) * back;
+  } else if (coat === 'tri') {
+    const low = 0.148 + 0.04 * cv.saddleLow, zEnd = -0.07 + 0.09 * cv.saddleEnd;
+    const s1 = sstep(low - 0.014, low + 0.014, y + n2 * 0.016);
+    const s2 = sstep(zEnd + 0.03, zEnd - 0.03, z + ax * 0.3 + n2 * 0.018 - (y - 0.2) * 0.4);
+    dark = s1 * s2 * (1 - white);
+    cream = 0.08 * cv.cream * back;
+  } else {
+    const tw = 0.02 + 0.02 * cv.tanW;
+    const tanBand = Math.max(pantsAt(tw) - pantsAt(0), legAt(tw * 0.8) - legAt(0), 0);
+    const vent = gauss(x, y, z, 0, 0.2, 0.06, 0.028, 0.03, 0.03);
+    const innerTan = sstep(0.1, 0.6, inward) * sstep(0.19, 0.15, y) * (1 - white);
+    tan = clamp(Math.max(tanBand, vent, innerTan) * (1 - white), 0, 1);
+    dark = clamp((1 - white) * (1 - tan), 0, 1);
+    cream = 0.05 * cv.cream * back;
+  }
+  return [white, dark, tan, cream];
+}
+
+/* =====================================================================
+   Geometry: surface nets on the SDF, then per-vertex fur/rig/shading data
+   ===================================================================== */
+function buildBody() {
+  const H = 0.005;
+  const X0 = -0.13, Y0 = -0.0063, Z0 = -0.38;
+  const NX = Math.ceil(0.26 / H) + 1, NY = Math.ceil(0.29 / H) + 1, NZ = Math.ceil(0.5 / H) + 1;
+  const F = new Float32Array(NX * NY * NZ);
+  let o = 0;
+  for (let k = 0; k < NZ; k++) { const z = Z0 + k * H; for (let j = 0; j < NY; j++) { const y = Y0 + j * H; for (let i = 0; i < NX; i++) F[o++] = sdf(X0 + i * H, y, z); } }
+  const gi = (i, j, k) => i + NX * (j + NY * k);
+  const CX = NX - 1, CY = NY - 1, CZ = NZ - 1;
+  const cell = new Int32Array(CX * CY * CZ).fill(-1);
+  const P = [];
+  const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+  const cv8 = new Float32Array(8);
+  for (let k = 0; k < CZ; k++) for (let j = 0; j < CY; j++) for (let i = 0; i < CX; i++) {
+    let mask = 0;
+    for (let c = 0; c < 8; c++) { const v = F[gi(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1))]; cv8[c] = v; if (v < 0) mask |= 1 << c; }
+    if (mask === 0 || mask === 255) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (let e = 0; e < 12; e++) {
+      const a = EDGES[e][0], b = EDGES[e][1], va = cv8[a], vb = cv8[b];
+      if ((va < 0) !== (vb < 0)) {
+        const t = va / (va - vb);
+        sx += (a & 1) + t * ((b & 1) - (a & 1));
+        sy += ((a >> 1) & 1) + t * (((b >> 1) & 1) - ((a >> 1) & 1));
+        sz += ((a >> 2) & 1) + t * (((b >> 2) & 1) - ((a >> 2) & 1));
+        n++;
+      }
+    }
+    cell[i + CX * (j + CY * k)] = P.length / 3;
+    P.push(X0 + (i + sx / n) * H, Y0 + (j + sy / n) * H, Z0 + (k + sz / n) * H);
+  }
+  const nv = P.length / 3;
+  const pos = new Float32Array(P);
+  // project onto the surface and get normals from the field
+  const nor = new Float32Array(nv * 3), g = [0, 0, 0];
+  for (let v = 0; v < nv; v++) {
+    let x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    for (let it = 0; it < 3; it++) { const d = sdf(x, y, z); sdfGrad(x, y, z, g); x -= g[0] * d; y -= g[1] * d; z -= g[2] * d; }
+    sdfGrad(x, y, z, g);
+    pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+    nor[v * 3] = g[0]; nor[v * 3 + 1] = g[1]; nor[v * 3 + 2] = g[2];
+  }
+  const I = [];
+  const ci = (i, j, k) => cell[i + CX * (j + CY * k)];
+  const d2 = (a, b) => { const x = pos[a * 3] - pos[b * 3], y = pos[a * 3 + 1] - pos[b * 3 + 1], z = pos[a * 3 + 2] - pos[b * 3 + 2]; return x * x + y * y + z * z; };
+  const quad = (a, b, c, d) => {
+    if (a < 0 || b < 0 || c < 0 || d < 0) return;
+    // orientation check against the field normal
+    const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    const wx = pos[c * 3] - pos[a * 3], wy = pos[c * 3 + 1] - pos[a * 3 + 1], wz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    const fx = uy * wz - uz * wy, fy = uz * wx - ux * wz, fz = ux * wy - uy * wx;
+    const nx = nor[a * 3] + nor[c * 3], ny = nor[a * 3 + 1] + nor[c * 3 + 1], nz = nor[a * 3 + 2] + nor[c * 3 + 2];
+    if (fx * nx + fy * ny + fz * nz < 0) { const t = b; b = d; d = t; }
+    if (d2(a, c) < d2(b, d)) I.push(a, b, c, a, c, d); else I.push(a, b, d, b, c, d);
+  };
+  for (let k = 0; k < NZ; k++) for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+    const in0 = F[gi(i, j, k)] < 0;
+    if (i < CX && j > 0 && j < CY && k > 0 && k < CZ && in0 !== (F[gi(i + 1, j, k)] < 0)) quad(ci(i, j - 1, k - 1), ci(i, j, k - 1), ci(i, j, k), ci(i, j - 1, k));
+    if (j < CY && i > 0 && i < CX && k > 0 && k < CZ && in0 !== (F[gi(i, j + 1, k)] < 0)) quad(ci(i - 1, j, k - 1), ci(i - 1, j, k), ci(i, j, k), ci(i, j, k - 1));
+    if (k < CZ && i > 0 && i < CX && j > 0 && j < CY && in0 !== (F[gi(i, j, k + 1)] < 0)) quad(ci(i - 1, j - 1, k), ci(i, j - 1, k), ci(i, j, k), ci(i - 1, j, k));
+  }
+  const index = new Uint32Array(I);
+
+  // adjacency (for smoothing skin weights)
+  const nb = Array.from({ length: nv }, () => []);
+  for (let t = 0; t < index.length; t += 3) {
+    const a = index[t], b = index[t + 1], c = index[t + 2];
+    nb[a].push(b, c); nb[b].push(a, c); nb[c].push(a, b);
+  }
+
+  // --- skin weights (9 bones) ---
+  const NB = 9;
+  const W = new Float32Array(nv * NB);
+  const segD = (px, py, pz, a, b) => {
+    const bax = b[0] - a[0], bay = b[1] - a[1], baz = b[2] - a[2], pax = px - a[0], pay = py - a[1], paz = pz - a[2];
+    const t = clamp((pax * bax + pay * bay + paz * baz) / (bax * bax + bay * bay + baz * baz), 0, 1);
+    return Math.hypot(pax - bax * t, pay - bay * t, paz - baz * t);
+  };
+  const PEL0 = [0, 0.186, -0.12], PEL1 = [0, 0.19, 0.03], SPN0 = [0, 0.188, -0.42];
+  for (let v = 0; v < nv; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const s = x >= 0 ? 1 : -1, ax = Math.abs(x);
+    const hip = [LEG.hip[0], LEG.hip[1], LEG.hip[2]], stf = LEG.stf, hock = LEG.hock, toe = LEG.toe;
+    const wf = d => 1 / Math.pow(Math.max(d, 0.003), 4);
+    const dBody = Math.min(segD(x, y, z, PEL0, PEL1), segD(x, y, z, SPN0, PEL0)) - 0.072;
+    const dTh = segD(ax, y, z, hip, stf) - 0.034;
+    const dSh = segD(ax, y, z, stf, hock) - 0.019;
+    const dFt = segD(ax, y, z, hock, toe) - 0.014;
+    const dTl = segD(x, y, z, TAIL0, TAIL1) - 0.014;
+    const body = wf(dBody), th = wf(dTh), sh = wf(dSh), ft = wf(dFt), tl = wf(dTl) * sstep(0.2, 0.225, y) * sstep(0.015, 0.035, z);
+    const fr = sstep(-0.06, -0.27, z);
+    const o9 = v * NB;
+    W[o9 + 0] = body * (1 - fr); W[o9 + 1] = body * fr;
+    W[o9 + (s > 0 ? 2 : 5)] = th; W[o9 + (s > 0 ? 3 : 6)] = sh; W[o9 + (s > 0 ? 4 : 7)] = ft;
+    W[o9 + 8] = tl;
+    let sum = 0; for (let b = 0; b < NB; b++) sum += W[o9 + b];
+    for (let b = 0; b < NB; b++) W[o9 + b] /= sum;
+  }
+  const W2 = new Float32Array(nv * NB);
+  for (let it = 0; it < 4; it++) {
+    for (let v = 0; v < nv; v++) {
+      const L = nb[v], o9 = v * NB;
+      for (let b = 0; b < NB; b++) {
+        let acc = 0; for (let q = 0; q < L.length; q++) acc += W[L[q] * NB + b];
+        W2[o9 + b] = L.length ? 0.5 * W[o9 + b] + 0.5 * acc / L.length : W[o9 + b];
+      }
+    }
+    W.set(W2);
+  }
+  const skinI = new Float32Array(nv * 4), skinW = new Float32Array(nv * 4);
+  for (let v = 0; v < nv; v++) {
+    const o9 = v * NB, y = pos[v * 3 + 1], s = pos[v * 3] >= 0 ? 1 : -1;
+    // paws are pinned to the foot bone
+    const pin = sstep(0.034, 0.024, y);
+    if (pin > 0) {
+      const fb = s > 0 ? 4 : 7;
+      for (let b = 0; b < NB; b++) W[o9 + b] *= 1 - pin;
+      W[o9 + fb] += pin;
+    }
+    const order = [...Array(NB).keys()].sort((a, b) => W[o9 + b] - W[o9 + a]).slice(0, 4);
+    let sum = 0; for (const b of order) sum += W[o9 + b];
+    for (let q = 0; q < 4; q++) { skinI[v * 4 + q] = order[q]; skinW[v * 4 + q] = W[o9 + order[q]] / sum; }
+  }
+
+  // --- fur, coat, flow and shading attributes ---
+  const aFlow = new Float32Array(nv * 4), aFur = new Float32Array(nv * 4), aCoat = new Float32Array(nv * 4);
+  const aLight = new Float32Array(nv * 4), aJig = new Float32Array(nv * 4);
+  const KEY = new THREE.Vector3(0.45, 0.85, 0.6).normalize();
+  const fluff = 0.93 + 0.14 * cv.fluff;
+  sdfWithTail = false;
+  for (let v = 0; v < nv; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const nx = nor[v * 3], ny = nor[v * 3 + 1], nz = nor[v * 3 + 2];
+    const ax = Math.abs(x), s = x >= 0 ? 1 : -1;
+    const pantsW = Math.max(gauss(x, y, z, 0.05, 0.12, 0.045, 0.06, 0.055, 0.045), gauss(x, y, z, -0.05, 0.12, 0.045, 0.06, 0.055, 0.045)) * sstep(-0.35, 0.3, nz);
+    const legW = sstep(0.098, 0.062, y) * sstep(0.025, 0.045, ax);
+    const pawW = sstep(0.04, 0.026, y);
+    const bellyW = sstep(-0.2, -0.7, ny) * sstep(0.17, 0.125, y) * sstep(0.0, -0.06, z);
+    const tailW = gauss(x, y, z, 0, 0.235, 0.05, 0.028, 0.03, 0.032);
+    const rumpW = gauss(x, y, z, 0, 0.2, 0.03, 0.12, 0.08, 0.06);
+    const thighW = sstep(0.4, 0.85, Math.abs(nx)) * sstep(0.06, 0.1, y) * sstep(0.22, 0.17, y) * sstep(-0.12, -0.06, z);
+    const pad = sstep(0.0055, 0.0022, y) * sstep(-0.3, -0.8, ny);
+    // fur length
+    let L = 0.021;
+    L = lerp(L, 0.028, rumpW);
+    L = lerp(L, 0.02, thighW);
+    L = lerp(L, 0.046, pantsW);
+    L = lerp(L, 0.03, bellyW);
+    L = lerp(L, 0.036, tailW);
+    L = lerp(L, 0.011, legW);
+    L = lerp(L, 0.0055, pawW);
+    L *= fluff * (0.86 + 0.28 * (0.5 + 0.5 * noiseC(x * 40, y * 40, z * 40)));
+    L *= 1 - pad;
+    // preferred hair direction before projection to the tangent plane
+    let dx = 0, dy = -0.3, dz = 1;                              // along the back towards the tail
+    const side = sstep(0.22, 0.12, y);
+    dx = lerp(dx, 0, side); dy = lerp(dy, -1, side); dz = lerp(dz, 0.35, side);  // flanks: down & back
+    const rumpF = sstep(-0.03, 0.03, z) * (1 - side * 0.4);           // rump: falls down and out over the britches
+    dx = lerp(dx, s * Math.min(ax * 6, 0.45), rumpF); dy = lerp(dy, -1, rumpF); dz = lerp(dz, 0.35, rumpF);
+    dx = lerp(dx, s * 0.22, pantsW); dy = lerp(dy, -1, pantsW); dz = lerp(dz, 0.18, pantsW);
+    dx = lerp(dx, 0, legW); dy = lerp(dy, -1, legW); dz = lerp(dz, 0.12, legW);
+    dx = lerp(dx, 0, pawW); dy = lerp(dy, -0.45, pawW); dz = lerp(dz, -1, pawW);
+    dx = lerp(dx, 0, bellyW); dy = lerp(dy, -1, bellyW); dz = lerp(dz, 0.25, bellyW);
+    dx = lerp(dx, 0, tailW); dy = lerp(dy, -0.25, tailW); dz = lerp(dz, 1, tailW);
+    const dn = dx * nx + dy * ny + dz * nz;
+    let tx = dx - nx * dn, ty = dy - ny * dn, tz = dz - nz * dn;
+    let tl = Math.hypot(tx, ty, tz);
+    if (tl < 1e-4) { tx = 0; ty = -nz; tz = ny; tl = Math.hypot(tx, ty, tz) || 1; }
+    let lift = 0.42;
+    lift = lerp(lift, 0.5, rumpW);
+    lift = lerp(lift, 0.56, pantsW);
+    lift = lerp(lift, 0.3, legW);
+    lift = lerp(lift, 0.24, pawW);
+    lift = lerp(lift, 0.36, bellyW);
+    lift = lerp(lift, 0.6, tailW);
+    aFlow.set([tx / tl, ty / tl, tz / tl, lift], v * 4);
+    const breathW = sstep(-0.05, -0.16, z) * sstep(0.08, 0.13, y);
+    aFur.set([L, pad, breathW, 0.5 * (1 - legW) * (1 - pawW)], v * 4);
+    aCoat.set(coatMasks(x, y, z, nx, ny, nz), v * 4);
+    aJig.set([
+      gauss(x, y, z, 0, 0.245, 0.02, 0.075, 0.055, 0.06),
+      gauss(x, y, z, 0.05, 0.115, 0.045, 0.055, 0.05, 0.045) * (1 - pawW),
+      gauss(x, y, z, -0.05, 0.115, 0.045, 0.055, 0.05, 0.045) * (1 - pawW),
+      gauss(x, y, z, 0, 0.1, -0.13, 0.085, 0.045, 0.1),
+    ], v * 4);
+    // baked ambient occlusion
+    let occ = 0, sca = 1;
+    for (let i = 1; i <= 5; i++) {
+      const hr = 0.008 * i;
+      occ += (hr - sdf(x + nx * hr, y + ny * hr, z + nz * hr)) * sca;
+      sca *= 0.8;
+    }
+    let ao = clamp(1 - 4.5 * occ, 0, 1);
+    ao *= 1 - 0.55 * Math.exp(-Math.max(y, 0) / 0.03) * (0.5 + 0.5 * Math.max(0, -ny));
+    ao *= 1 - 0.25 * Math.max(0, -ny) * Math.exp(-y / 0.12);
+    // baked soft shadow from the key light
+    let res = 1, t = 0.008;
+    const ox = x + nx * 0.004, oy = y + ny * 0.004, oz = z + nz * 0.004;
+    for (let i = 0; i < 40 && t < 0.45; i++) {
+      const hh = sdf(ox + KEY.x * t, oy + KEY.y * t, oz + KEY.z * t);
+      res = Math.min(res, 9 * hh / t);
+      if (res < 0.002) break;
+      t += clamp(hh, 0.004, 0.03);
+    }
+    const shadow = lerp(sstep(0, 1, clamp(res, 0, 1)), 1, 0.5 * tailW);
+    // natural tone variation: richer along the topline, paler low on the flanks, soft patches
+    const tone = lerp(1.07, 0.9, sstep(0.13, 0.27, y)) * (1 + 0.07 * noiseC(x * 14 + 3, y * 14, z * 14));
+    aLight.set([lerp(clamp(ao, 0, 1), 1, 0.5 * tailW), shadow, tone * (1 + 0.1 * tailW), 0], v * 4);
+  }
+  sdfWithTail = true;
+  return { pos, nor, index, skinI, skinW, aFlow, aFur, aCoat, aLight, aJig, nv };
+}
+
+/* =====================================================================
+   Procedural strand volume: Worley strands + clump field (RGBA8 3D texture)
+   R: distance to strand centre, G/B: per-strand randoms, A: distance to clump centre
+   ===================================================================== */
+function buildStrandTexture(rng) {
+  const N = 64, C = 16, S = N / C, CC = 4, CS = N / CC;
+  const fp = new Float32Array(C * C * C * 5);
+  for (let i = 0; i < C * C * C * 5; i++) fp[i] = rng();
+  const cp = new Float32Array(CC * CC * CC * 3);
+  for (let i = 0; i < cp.length; i++) cp[i] = 0.2 + 0.6 * rng();
+  const data = new Uint8Array(N * N * N * 4);
+  let o = 0;
+  for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const px = (x + 0.5) / S, py = (y + 0.5) / S, pz = (z + 0.5) / S;
+    const ix = Math.floor(px), iy = Math.floor(py), iz = Math.floor(pz);
+    let best = 1e9, bi = 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = ix + dx, cy = iy + dy, cz = iz + dz;
+      const id = (((cx + C) % C) + C * (((cy + C) % C) + C * ((cz + C) % C))) * 5;
+      const qx = cx + fp[id] - px, qy = cy + fp[id + 1] - py, qz = cz + fp[id + 2] - pz;
+      const dd = qx * qx + qy * qy + qz * qz;
+      if (dd < best) { best = dd; bi = id; }
+    }
+    const qx = (x + 0.5) / CS, qy = (y + 0.5) / CS, qz = (z + 0.5) / CS;
+    const jx = Math.floor(qx), jy = Math.floor(qy), jz = Math.floor(qz);
+    let bc = 1e9;
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = jx + dx, cy = jy + dy, cz = jz + dz;
+      const id = (((cx + CC) % CC) + CC * (((cy + CC) % CC) + CC * ((cz + CC) % CC))) * 3;
+      const rx = cx + cp[id] - qx, ry = cy + cp[id + 1] - qy, rz = cz + cp[id + 2] - qz;
+      const dd = rx * rx + ry * ry + rz * rz;
+      if (dd < bc) bc = dd;
+    }
+    data[o] = Math.min(255, Math.sqrt(best) * 255);
+    data[o + 1] = fp[bi + 3] * 255;
+    data[o + 2] = fp[bi + 4] * 255;
+    data[o + 3] = Math.min(255, Math.sqrt(bc) / 0.9 * 255);
+    o += 4;
+  }
+  const tex = new THREE.Data3DTexture(data, N, N, N);
+  tex.format = THREE.RGBAFormat;
+  tex.type = THREE.UnsignedByteType;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping;
+  tex.unpackAlignment = 1;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/* =====================================================================
+   Renderer, scene, camera
+   ===================================================================== */
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+document.body.appendChild(renderer.domElement);
+const canvas = renderer.domElement;
+canvas.setAttribute('aria-label', 'Interactive 3D corgi rump. Drag to orbit, click the dog to make it wiggle.');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
+
+const LIGHT = {
+  keyDir: new THREE.Vector3(0.45, 0.85, 0.6).normalize(),
+  keyCol: new THREE.Vector3(1.0, 0.87, 0.72).multiplyScalar(2.25),
+  fillDir: new THREE.Vector3(-0.8, 0.35, -0.3).normalize(),
+  fillCol: new THREE.Vector3(0.46, 0.48, 0.58).multiplyScalar(0.56),
+  skyCol: new THREE.Vector3(0.6, 0.64, 0.74).multiplyScalar(0.72),
+  gndCol: new THREE.Vector3(0.62, 0.5, 0.38).multiplyScalar(0.56),
+  rimDir: new THREE.Vector3(-0.25, 0.45, -0.86).normalize(),
+  rimCol: new THREE.Vector3(1.0, 0.85, 0.68).multiplyScalar(0.5),
+};
+const EXPOSURE = 0.92;
+const GROUND_ALB = rgb(150, 136, 118);
+const acesJ = x => clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0, 1);
+const lin2srgb = c => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+const BG = new THREE.Vector3(
+  ...['x', 'y', 'z'].map(k => lin2srgb(acesJ(GROUND_ALB[k] * (LIGHT.keyCol[k] * LIGHT.keyDir.y + LIGHT.skyCol[k]) * EXPOSURE))));
+renderer.setClearColor(new THREE.Color().setRGB(BG.x, BG.y, BG.z, THREE.SRGBColorSpace), 1);
+document.body.style.background = `rgb(${Math.round(BG.x * 255)},${Math.round(BG.y * 255)},${Math.round(BG.z * 255)})`;
+
+const GLSL_COMMON = /* glsl */`
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+vec3 toSRGB(vec3 c){ return mix(c*12.92, 1.055*pow(c, vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+`;
+
+const FUR_VS = /* glsl */`
+precision highp float;
+precision highp int;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec3 cameraPosition;
+uniform mat4 uBones[9];
+uniform vec3 uBoneLag[9];
+uniform vec3 uJig[4];
+uniform float uShells;
+uniform float uInstOffset;
+uniform float uBreath;
+uniform vec3 uKeyDir, uKeyCol, uFillDir, uFillCol, uSkyCol, uGndCol, uRimDir, uRimCol;
+in vec3 position;
+in vec3 normal;
+in vec4 aSkinI;
+in vec4 aSkinW;
+in vec4 aFlow;
+in vec4 aFur;
+in vec4 aCoat;
+in vec4 aLight;
+in vec4 aJig;
+out vec3 vRest;
+out vec3 vLight;
+out vec3 vSpec;
+out vec4 vCoat;
+out vec3 vFur;
+out float vFade;
+out float vTone;
+out float vNV;
+out float vRad;
+void main(){
+  float h = (float(gl_InstanceID) + uInstOffset) / uShells;
+  ivec4 bi = ivec4(aSkinI + 0.5);
+  vec4 w = aSkinW;
+  mat4 S = uBones[bi.x]*w.x + uBones[bi.y]*w.y + uBones[bi.z]*w.z + uBones[bi.w]*w.w;
+  vec3 lagB = uBoneLag[bi.x]*w.x + uBoneLag[bi.y]*w.y + uBoneLag[bi.z]*w.z + uBoneLag[bi.w]*w.w;
+  vec3 lagJ = uJig[0]*aJig.x + uJig[1]*aJig.y + uJig[2]*aJig.z + uJig[3]*aJig.w;
+  mat3 R = mat3(S);
+  vec3 n = normalize(R * normal);
+  vec3 t = R * aFlow.xyz;
+  vec3 p = (S * vec4(position, 1.0)).xyz;
+  p += lagJ * aFur.w + n * (uBreath * aFur.z);
+  float L = aFur.x;
+  float lift = aFlow.w;
+  vec3 d0 = normalize(n * lift + t * (1.0 - lift));
+  vec3 bend = vec3(0.0, -0.2, 0.0) + (lagB * 1.2 + lagJ * 1.5) / max(L, 0.012);
+  vec3 d = d0 + bend * h;
+  d += n * max(0.0, 0.3 * length(d) - dot(d, n));
+  d = normalize(d);
+  vec3 pw = p + d * (L * h);
+  vec3 V = normalize(cameraPosition - pw);
+  float sh = mix(aLight.y, 1.0, 0.3 * h);
+  float ao = mix(aLight.x, 1.0, 0.45 * h);
+  float ndl = dot(n, uKeyDir);
+  float diff = clamp((ndl + 0.42) / 1.42, 0.0, 1.0);
+  vec3 light = uKeyCol * diff * diff * sh;
+  light += uFillCol * clamp((dot(n, uFillDir) + 0.35) / 1.35, 0.0, 1.0) * ao;
+  light += mix(uGndCol, uSkyCol, n.y * 0.5 + 0.5) * ao;
+  float occ = mix(mix(0.8, 0.36, smoothstep(0.004, 0.026, L)), 1.0, pow(h, 0.65));
+  float nv = clamp(dot(n, V), 0.0, 1.0);
+  float rim = pow(1.0 - nv, 3.0) * (0.35 + 0.65 * h);
+  vLight = light * occ + uRimCol * rim * clamp(dot(n, uRimDir) + 0.65, 0.0, 1.0) * ao;
+  vec3 H = normalize(uKeyDir + V);
+  float th = dot(d, H);
+  float sTH = sqrt(max(0.0, 1.0 - th * th));
+  vSpec = uKeyCol * sh * (pow(sTH, 70.0) * 0.05 + pow(sTH, 9.0) * 0.012) * h * clamp(ndl + 0.35, 0.0, 1.0);
+  vRest = position;
+  vCoat = aCoat;
+  vFur = vec3(h, L, aFur.y);
+  vTone = aLight.z;
+  vNV = nv;
+  vRad = length(vec2(position.x / 0.085, (position.y - 0.19) / 0.074));
+  vFade = smoothstep(-0.3, -0.115, position.z);
+  gl_Position = projectionMatrix * viewMatrix * vec4(pw, 1.0);
+}`;
+
+const FUR_FS = /* glsl */`
+precision highp float;
+precision highp sampler3D;
+uniform sampler3D uStrand;
+uniform float uTile;
+uniform vec3 uRed, uTan, uBlack, uWhite, uCream, uTip, uPad;
+uniform float uSable;
+uniform float uExposure;
+uniform vec3 uBg;
+uniform float uPass;
+in vec3 vRest;
+in vec3 vLight;
+in vec3 vSpec;
+in vec4 vCoat;
+in vec3 vFur;
+in float vFade;
+in float vTone;
+in float vNV;
+in float vRad;
+out vec4 fragColor;
+${GLSL_COMMON}
+float sel(float m, float r){ return clamp((m * 1.25 - 0.12 - r) * 6.0 + 0.5, 0.0, 1.0); }
+void main(){
+  float h = vFur.x;
+  // pass 0: opaque skin layer of the solid body; pass 1: skin layer of the fading front;
+  // pass 2: all fur shells, alpha blended inside-out over the skin layer;
+  // pass 3: inside of the solid body, only ever seen end-on through the fading front
+  if (uPass < 1.5 && ((uPass < 0.5) != (vFade > 0.999))) discard;
+  if (uPass > 2.5 && vFade < 0.999) discard;
+  vec4 s = texture(uStrand, vRest / uTile);
+  float r1 = s.g, r2 = s.b, cd = s.a;
+  float alpha = 1.0;
+  float hn = 0.0;
+  if (h > 0.0) {
+    if (vFur.y < 0.0015) discard;
+    float sl = mix(0.42, 1.0, r1) * mix(1.0, 0.62, smoothstep(0.3, 0.9, cd)) * mix(0.3, 1.0, vFade);
+    if (h > sl || r1 > vFade * 1.25) discard;
+    hn = h / sl;
+    float rad = 0.6 * (1.0 - 0.8 * pow(hn, 1.35));
+    float aa = fwidth(s.r) * 0.7 + 0.02;
+    alpha = smoothstep(rad + aa, rad - aa, s.r);
+    if (alpha < 0.01) discard;
+  }
+  float rw = fract(r2 * 7.31 + 0.13), rd = fract(r2 * 3.17 + 0.71), rt = fract(r2 * 5.53 + 0.37);
+  float ws = vCoat.x, ds = vCoat.y, ts = vCoat.z;
+  if (h > 0.0) { ws = sel(ws, rw); ds = sel(ds, rd); ts = sel(ts, rt); }
+  vec3 c = mix(uRed, uTan, ts) * vTone;
+  c = mix(c, uBlack, ds * (1.0 - uSable));
+  c = mix(c, mix(uWhite, uCream, vCoat.w), ws);
+  // paler, softer undercoat near the roots
+  c = mix(mix(c, vec3(dot(c, vec3(0.33))), 0.25) * 1.1 + 0.015, c, smoothstep(0.0, 0.45, hn));
+  // dark-tipped guard hairs (sable, and light ticking on reds)
+  float tip = smoothstep(0.18, 0.7, hn) * vCoat.y * uSable * (1.0 - ws) * step(0.12, r1);
+  c = mix(c, uTip, tip * 0.94);
+  c *= 0.86 + 0.28 * fract(r2 * 11.7 + r1 * 3.1);
+  c = mix(c, uPad, vFur.z);
+  vec3 col = c * vLight + vSpec;
+  vec3 outc = toSRGB(aces(col * uExposure));
+  if (uPass < 0.5) { fragColor = vec4(outc, 1.0); return; }
+  if (uPass > 2.5) { fragColor = vec4(mix(uBg, outc * 0.92, 0.85 * smoothstep(0.5, 1.05, vRad)), 1.0); return; }
+  // the front of the body melts away into the studio backdrop
+  // grazing parts of the fading front thin out first, so seen end-on it dissolves softly
+  float a = alpha * pow(vFade, 1.4) * mix(sqrt(vNV), 1.0, vFade * vFade);
+  fragColor = vec4(mix(uBg, outc, 0.45 + 0.55 * vFade) * a, a);
+}`;
+
+const GROUND_VS = /* glsl */`
+precision highp float;
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+in vec3 position;
+out vec3 vW;
+void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
+
+const GROUND_FS = /* glsl */`
+precision highp float;
+uniform vec4 uSph[15];
+uniform float uSphW[15];
+uniform vec3 uKeyDir, uKeyCol, uSkyCol;
+uniform vec3 uAlb, uBg;
+uniform float uExposure;
+in vec3 vW;
+out vec4 fragColor;
+${GLSL_COMMON}
+float sphSoftShadow(vec3 ro, vec3 rd, vec4 s, float k){
+  vec3 oc = ro - s.xyz;
+  float b = dot(oc, rd);
+  float c = dot(oc, oc) - s.w * s.w;
+  float h = b * b - c;
+  float d = sqrt(max(0.0, s.w * s.w - h)) - s.w;
+  float t = -b - sqrt(max(h, 0.0));
+  return (t < 0.0) ? 1.0 : smoothstep(0.0, 1.0, 2.5 * k * d / t);
+}
+void main(){
+  vec3 p = vW;
+  float ao = 1.0, sh = 1.0;
+  for (int i = 0; i < 15; i++) {
+    vec4 s = uSph[i];
+    vec3 dv = s.xyz - p;
+    float l2 = dot(dv, dv);
+    float occ = clamp(dv.y * inversesqrt(l2), 0.0, 1.0) * s.w * s.w / l2;
+    ao *= 1.0 - clamp(occ, 0.0, 1.0) * uSphW[i];
+    sh = min(sh, mix(1.0, sphSoftShadow(p, uKeyDir, s, 2.2), uSphW[i]));
+  }
+  ao = pow(ao, 1.25);
+  vec3 col = uAlb * (uKeyCol * uKeyDir.y * mix(0.25, 1.0, sh) * mix(0.6, 1.0, ao) + uSkyCol * ao);
+  vec3 c = toSRGB(aces(col * uExposure));
+  float r = length(p.xz - vec2(0.0, -0.1));
+  fragColor = vec4(mix(c, uBg, smoothstep(0.55, 3.2, r)), 1.0);
+}`;
+
+/* ---------- build the dog ---------- */
+const body = buildBody();
+const strandTex = buildStrandTexture(rngFur);
+// Triangles are split into the solid body and the fading front so that each pass only
+// processes the geometry it can actually draw.
+// Shells are split by region as well: the long main coat gets the most layers, while the
+// fading front and the short-haired legs and paws look the same with far fewer.
+const FADE_Z = -0.115;
+const solidIdx = [], fadeIdx = [], mainIdx = [], softIdx = [], shortIdx = [];
+for (let t = 0; t < body.index.length; t += 3) {
+  const a = body.index[t], b = body.index[t + 1], c = body.index[t + 2];
+  const zmin = Math.min(body.pos[a * 3 + 2], body.pos[b * 3 + 2], body.pos[c * 3 + 2]);
+  const zmax = Math.max(body.pos[a * 3 + 2], body.pos[b * 3 + 2], body.pos[c * 3 + 2]);
+  const lmax = Math.max(body.aFur[a * 4], body.aFur[b * 4], body.aFur[c * 4]);
+  if (zmax >= FADE_Z) solidIdx.push(a, b, c);
+  if (zmin < FADE_Z && zmax > -0.31) fadeIdx.push(a, b, c);
+  if (zmax <= -0.31 || lmax < 0.0015) continue;
+  if (lmax < 0.0165) shortIdx.push(a, b, c);
+  else if (zmax < -0.165) softIdx.push(a, b, c);
+  else mainIdx.push(a, b, c);
+}
+const sharedAttrs = {
+  position: new THREE.BufferAttribute(body.pos, 3),
+  normal: new THREE.BufferAttribute(body.nor, 3),
+  aSkinI: new THREE.BufferAttribute(body.skinI, 4),
+  aSkinW: new THREE.BufferAttribute(body.skinW, 4),
+  aFlow: new THREE.BufferAttribute(body.aFlow, 4),
+  aFur: new THREE.BufferAttribute(body.aFur, 4),
+  aCoat: new THREE.BufferAttribute(body.aCoat, 4),
+  aLight: new THREE.BufferAttribute(body.aLight, 4),
+  aJig: new THREE.BufferAttribute(body.aJig, 4),
+};
+const makeGeo = idx => {
+  const g = new THREE.InstancedBufferGeometry();
+  g.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
+  for (const k in sharedAttrs) g.setAttribute(k, sharedAttrs[k]);
+  return g;
+};
+const geoSkin = makeGeo(solidIdx), geoFade = makeGeo(fadeIdx);
+const SHELL_SETS = [[mainIdx, 46], [softIdx, 22], [shortIdx, 18]].map(([idx, n]) => ({ geo: makeGeo(idx), n }));
+
+const QUALITY = [{ shells: 1, dpr: 2 }, { shells: 0.75, dpr: 1.5 }, { shells: 0.55, dpr: 1.25 }, { shells: 0.4, dpr: 1 }];
+let qLevel = 0;
+geoSkin.instanceCount = geoFade.instanceCount = 1;
+
+const boneMats = Array.from({ length: 9 }, () => new THREE.Matrix4());
+const boneLag = Array.from({ length: 9 }, () => new THREE.Vector3());
+const jigLag = Array.from({ length: 4 }, () => new THREE.Vector3());
+const furUniforms = {
+  uBones: { value: boneMats },
+  uBoneLag: { value: boneLag },
+  uJig: { value: jigLag },
+  uShells: { value: 1 },
+  uInstOffset: { value: 0 },
+  uBreath: { value: 0 },
+  uKeyDir: { value: LIGHT.keyDir }, uKeyCol: { value: LIGHT.keyCol },
+  uFillDir: { value: LIGHT.fillDir }, uFillCol: { value: LIGHT.fillCol },
+  uSkyCol: { value: LIGHT.skyCol }, uGndCol: { value: LIGHT.gndCol },
+  uRimDir: { value: LIGHT.rimDir }, uRimCol: { value: LIGHT.rimCol },
+  uStrand: { value: strandTex },
+  uTile: { value: 0.031 },
+  uRed: { value: PAL.red }, uTan: { value: PAL.tan }, uBlack: { value: PAL.black },
+  uWhite: { value: PAL.white }, uCream: { value: PAL.cream }, uTip: { value: PAL.tip }, uPad: { value: PAL.pad },
+  uSable: { value: PAL.sable },
+  uExposure: { value: EXPOSURE },
+  uBg: { value: BG },
+};
+const furMaterial = (pass, blended) => new THREE.RawShaderMaterial({
+  glslVersion: THREE.GLSL3, vertexShader: FUR_VS, fragmentShader: FUR_FS,
+  uniforms: { ...furUniforms, uPass: { value: pass }, uInstOffset: { value: pass === 2 ? 1 : 0 }, uShells: { value: 1 } },
+  transparent: blended, depthWrite: !blended, premultipliedAlpha: blended, side: pass === 3 ? THREE.BackSide : THREE.FrontSide,
+});
+for (const set of SHELL_SETS) set.mat = furMaterial(2, true);
+function applyShellCounts() {
+  for (const set of SHELL_SETS) {
+    const n = Math.max(8, Math.round(set.n * QUALITY[qLevel].shells));
+    set.geo.instanceCount = n;
+    set.mat.uniforms.uShells.value = n;
+  }
+}
+applyShellCounts();
+[[geoSkin, furMaterial(0, false)], [geoSkin, furMaterial(3, false)], [geoFade, furMaterial(1, true)], ...SHELL_SETS.map(st => [st.geo, st.mat])].forEach(([g, m], i) => {
+  const mesh = new THREE.Mesh(g, m);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 1 + i;
+  scene.add(mesh);
+});
+
+/* ---------- ground with analytic soft shadows from body proxies ---------- */
+// [bone, x, y, z, radius, strength]
+const PROXIES = [
+  [0, 0, 0.19, -0.03, 0.118, 1], [0, 0, 0.15, 0.025, 0.095, 1], [1, 0, 0.19, -0.13, 0.112, 1],
+  [1, 0, 0.19, -0.21, 0.105, 0.55], [1, 0, 0.19, -0.28, 0.1, 0.2],
+  [2, 0.066, 0.12, -0.035, 0.06, 1], [5, -0.066, 0.12, -0.035, 0.06, 1],
+  [3, 0.066, 0.07, -0.032, 0.03, 1], [6, -0.066, 0.07, -0.032, 0.03, 1],
+  [4, 0.067, 0.02, -0.036, 0.026, 1], [7, -0.067, 0.02, -0.036, 0.026, 1],
+  [4, 0.067, 0.013, -0.059, 0.02, 1], [7, -0.067, 0.013, -0.059, 0.02, 1],
+  [8, 0, 0.245, 0.06, 0.035, 1], [0, 0, 0.11, -0.1, 0.07, 0.6],
+];
+const proxyVec = PROXIES.map(() => new THREE.Vector4());
+const groundMat = new THREE.RawShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  vertexShader: GROUND_VS,
+  fragmentShader: GROUND_FS,
+  uniforms: {
+    uSph: { value: proxyVec },
+    uSphW: { value: PROXIES.map(p => p[5]) },
+    uKeyDir: { value: LIGHT.keyDir }, uKeyCol: { value: LIGHT.keyCol }, uSkyCol: { value: LIGHT.skyCol },
+    uAlb: { value: GROUND_ALB }, uBg: { value: BG },
+    uExposure: { value: EXPOSURE },
+  },
+});
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2), groundMat);
+ground.frustumCulled = false;
+scene.add(ground);
+
+/* =====================================================================
+   Rig: pelvis / spine / tail transforms + two-bone IK legs with planted paws
+   ===================================================================== */
+const V3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+const PIV_YAW = new THREE.Vector3(0, 0.18, -0.25), PIV_ROLL = new THREE.Vector3(0, 0.15, -0.03);
+const PIV_SPINE = new THREE.Vector3(0, 0.17, -0.5), TAIL_BASE = V3(TAIL0);
+const legs = [1, -1].map(s => {
+  const m = a => new THREE.Vector3(a[0] * s, a[1], a[2]);
+  const hipR = m(LEG.hip), stfR = m(LEG.stf), hockR = m(LEG.hock), pawR = m(LEG.paw);
+  const Dr = hockR.clone().sub(hipR).normalize();
+  const k = stfR.clone().sub(hipR);
+  const poleR = k.clone().addScaledVector(Dr, -k.dot(Dr)).normalize();
+  const basis = (u, pole) => { const y = pole.clone().addScaledVector(u, -pole.dot(u)).normalize(); return new THREE.Matrix4().makeBasis(u, y, new THREE.Vector3().crossVectors(u, y)); };
+  const frThighT = basis(stfR.clone().sub(hipR).normalize(), poleR).transpose();
+  const frShinT = basis(hockR.clone().sub(stfR).normalize(), poleR).transpose();
+  return { s, hipR, stfR, hockR, pawR, poleR, frThighT, frShinT, L1: hipR.distanceTo(stfR), L2: stfR.distanceTo(hockR) };
+});
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _q = new THREE.Quaternion();
+const _hip = new THREE.Vector3(), _hock = new THREE.Vector3(), _D = new THREE.Vector3(), _pole = new THREE.Vector3();
+const _stf = new THREE.Vector3(), _u = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _t = new THREE.Vector3();
+const _e = new THREE.Euler();
+
+function footMatrix(out, px, py, pz, ang, pawR) {
+  out.makeRotationX(ang);
+  _t.copy(pawR).applyMatrix4(out);
+  out.setPosition(px - _t.x, py - _t.y, pz - _t.z);
+}
+function boneFrom(out, jointW, u, pole, frT, jointR) {
+  _y.copy(pole).addScaledVector(u, -pole.dot(u)).normalize();
+  _z.crossVectors(u, _y);
+  out.makeBasis(u, _y, _z).multiply(frT);
+  _t.copy(jointR).applyMatrix4(out);
+  out.setPosition(jointW.x - _t.x, jointW.y - _t.y, jointW.z - _t.z);
+}
+function solveLeg(leg, Mp, qp, lift, fwd, mThigh, mShin, mFoot) {
+  _hip.copy(leg.hipR).applyMatrix4(Mp);
+  let px = leg.pawR.x, py = leg.pawR.y + lift, pz = leg.pawR.z - fwd;
+  const ang = -lift * 6.5;
+  footMatrix(mFoot, px, py, pz, ang, leg.pawR);
+  _hock.copy(leg.hockR).applyMatrix4(mFoot);
+  _D.subVectors(_hock, _hip);
+  let dl = _D.length();
+  const maxR = (leg.L1 + leg.L2) * 0.985;
+  if (dl > maxR) {          // out of reach (e.g. mid-hop): the paw leaves the ground
+    const ex = dl - maxR;
+    px -= _D.x / dl * ex; py -= _D.y / dl * ex; pz -= _D.z / dl * ex;
+    footMatrix(mFoot, px, py, pz, ang - ex * 4, leg.pawR);
+    _hock.copy(leg.hockR).applyMatrix4(mFoot);
+    _D.subVectors(_hock, _hip);
+    dl = _D.length();
+  }
+  const dc = clamp(dl, (leg.L1 + leg.L2) * 0.35, maxR);
+  _D.multiplyScalar(1 / dl);
+  const a = (leg.L1 * leg.L1 - leg.L2 * leg.L2 + dc * dc) / (2 * dc);
+  const hh = Math.sqrt(Math.max(leg.L1 * leg.L1 - a * a, 0));
+  _pole.copy(leg.poleR).applyQuaternion(qp);
+  _pole.addScaledVector(_D, -_pole.dot(_D)).normalize();
+  _stf.copy(_hip).addScaledVector(_D, a).addScaledVector(_pole, hh);
+  _u.subVectors(_stf, _hip).normalize();
+  boneFrom(mThigh, _hip, _u, _pole, leg.frThighT, leg.hipR);
+  _u.subVectors(_hock, _stf).normalize();
+  boneFrom(mShin, _stf, _u, _pole, leg.frShinT, leg.stfR);
+}
+
+const pose = { tx: 0, ty: 0, tz: 0, yaw: 0, roll: 0, pitch: 0, syaw: 0, sroll: 0, stx: 0, sty: 0, tail: 0, tailLift: 0, liftL: 0, liftR: 0, fwdL: 0, fwdR: 0 };
+const POSE_KEYS = Object.keys(pose);
+function applyPose(P) {
+  const Mp = boneMats[0];
+  Mp.makeTranslation(P.tx, P.ty, P.tz);
+  Mp.multiply(_m1.makeTranslation(PIV_YAW.x, PIV_YAW.y, PIV_YAW.z));
+  Mp.multiply(_m1.makeRotationY(P.yaw));
+  Mp.multiply(_m1.makeTranslation(PIV_ROLL.x - PIV_YAW.x, PIV_ROLL.y - PIV_YAW.y, PIV_ROLL.z - PIV_YAW.z));
+  Mp.multiply(_m1.makeRotationZ(P.roll));
+  Mp.multiply(_m1.makeRotationX(P.pitch));
+  Mp.multiply(_m1.makeTranslation(-PIV_ROLL.x, -PIV_ROLL.y, -PIV_ROLL.z));
+  const Ms = boneMats[1];
+  Ms.makeTranslation(P.stx, P.sty, 0);
+  Ms.multiply(_m1.makeTranslation(PIV_SPINE.x, PIV_SPINE.y, PIV_SPINE.z));
+  Ms.multiply(_m1.makeRotationY(P.syaw));
+  Ms.multiply(_m1.makeRotationZ(P.sroll));
+  Ms.multiply(_m1.makeTranslation(-PIV_SPINE.x, -PIV_SPINE.y, -PIV_SPINE.z));
+  const Mt = boneMats[8];
+  Mt.copy(Mp);
+  Mt.multiply(_m1.makeTranslation(TAIL_BASE.x, TAIL_BASE.y, TAIL_BASE.z));
+  Mt.multiply(_m1.makeRotationY(P.tail));
+  Mt.multiply(_m1.makeRotationX(-P.tailLift));
+  Mt.multiply(_m1.makeTranslation(-TAIL_BASE.x, -TAIL_BASE.y, -TAIL_BASE.z));
+  _q.setFromRotationMatrix(_m2.extractRotation(Mp));
+  solveLeg(legs[0], Mp, _q, P.liftL, P.fwdL, boneMats[2], boneMats[3], boneMats[4]);
+  solveLeg(legs[1], Mp, _q, P.liftR, P.fwdR, boneMats[5], boneMats[6], boneMats[7]);
+}
+
+/* =====================================================================
+   Secondary motion: damped springs for fur lag and fluff jiggle
+   ===================================================================== */
+class Spring {
+  constructor(k, c, max) { this.k = k; this.c = c; this.max = max; this.x = new THREE.Vector3(); this.v = new THREE.Vector3(); this.prev = new THREE.Vector3(); this.ok = false; }
+  step(anchor, dt, out) {
+    if (!this.ok) { this.x.copy(anchor); this.prev.copy(anchor); this.ok = true; }
+    const n = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / n;
+    for (let i = 1; i <= n; i++) {
+      const f = i / n;
+      const ax = this.prev.x + (anchor.x - this.prev.x) * f, ay = this.prev.y + (anchor.y - this.prev.y) * f, az = this.prev.z + (anchor.z - this.prev.z) * f;
+      this.v.x += (this.k * (ax - this.x.x) - this.c * this.v.x) * h;
+      this.v.y += (this.k * (ay - this.x.y) - this.c * this.v.y) * h;
+      this.v.z += (this.k * (az - this.x.z) - this.c * this.v.z) * h;
+      this.x.addScaledVector(this.v, h);
+    }
+    this.prev.copy(anchor);
+    out.subVectors(this.x, anchor);
+    const l = out.length();
+    if (l > this.max) { out.multiplyScalar(this.max / l); this.x.copy(anchor).add(out); this.v.multiplyScalar(0.7); }
+  }
+}
+const BONE_ANCHORS = [[0, 0.2, 0.0], [0, 0.2, -0.22], [0.065, 0.13, -0.03], [0.066, 0.07, -0.033], [0.067, 0.02, -0.04],
+  [-0.065, 0.13, -0.03], [-0.066, 0.07, -0.033], [-0.067, 0.02, -0.04], [0, 0.24, 0.055]].map(V3);
+const boneSprings = BONE_ANCHORS.map((_, i) => new Spring(i === 8 ? 700 : 1100, i === 8 ? 16 : 30, 0.02));
+const JIG = [ // anchor bone, rest point, stiffness, damping
+  [0, [0, 0.245, 0.02], 190, 7.5], [0, [0.05, 0.115, 0.045], 120, 5.2], [0, [-0.05, 0.115, 0.045], 125, 5.4], [0, [0, 0.105, -0.12], 150, 6.5],
+];
+const jigSprings = JIG.map(j => new Spring(j[2], j[3], 0.024));
+const jigRest = JIG.map(j => V3(j[1]));
+const _anchor = new THREE.Vector3();
+function updateSprings(dt) {
+  for (let i = 0; i < 9; i++) { _anchor.copy(BONE_ANCHORS[i]).applyMatrix4(boneMats[i]); boneSprings[i].step(_anchor, dt, boneLag[i]); }
+  for (let i = 0; i < 4; i++) {
+    _anchor.copy(jigRest[i]).applyMatrix4(boneMats[JIG[i][0]]);
+    if (i === 3) _anchor.lerp(_t.copy(jigRest[i]).applyMatrix4(boneMats[1]), 0.5);
+    jigSprings[i].step(_anchor, dt, jigLag[i]);
+  }
+}
+function updateProxies() {
+  for (let i = 0; i < PROXIES.length; i++) {
+    const p = PROXIES[i];
+    _t.set(p[1], p[2], p[3]).applyMatrix4(boneMats[p[0]]);
+    proxyVec[i].set(_t.x, _t.y, _t.z, p[4]);
+  }
+}
+
+/* =====================================================================
+   Behaviour: idle breathing & weight shifts, click wiggles, excitement
+   ===================================================================== */
+const env = (t, a, d, r) => sstep(0, a, t) * (1 - sstep(d - r, d, t));
+const bump = (t, c, w) => { const x = (t - c) / w; return Math.abs(x) < 1 ? 0.5 + 0.5 * Math.cos(Math.PI * x) : 0; };
+const sideOf = r => (r() < 0.5 ? -1 : 1);
+
+const WIGGLES = {
+  // quick happy side-to-side wag of the whole rump, tail stub leading
+  wag: {
+    make: r => ({ f: lerp(3.3, 4.7, r()), cyc: 5 + Math.floor(r() * 4), yaw: lerp(0.055, 0.085, r()), tx: lerp(0.003, 0.008, r()),
+      roll: lerp(0.02, 0.06, r()), tail: lerp(0.35, 0.6, r()), lead: lerp(0.4, 1.3, r()), lag: lerp(0.3, 1.0, r()), dir: sideOf(r), bob: r() }),
+    dur: p => p.cyc / p.f + 0.3,
+    eval(p, t, o, A) {
+      const e = env(t, 0.1, p.cyc / p.f + 0.3, 0.35) * A, s = e * p.dir, ph = TAU * p.f * t;
+      o.yaw += Math.sin(ph) * p.yaw * s;
+      o.tx += Math.sin(ph - 0.6) * p.tx * s;
+      o.roll += Math.sin(ph - 1.0) * p.roll * s;
+      o.syaw += Math.sin(ph - p.lag) * p.yaw * 0.35 * s;
+      o.tail += Math.sin(ph + p.lead) * p.tail * s;
+      o.ty += (Math.cos(2 * ph) - 1) * 0.0018 * e * (0.5 + p.bob);
+    },
+  },
+  // slow, exaggerated loaf sway: hips lead, body and fluff follow late
+  sway: {
+    make: r => ({ f: lerp(0.95, 1.35, r()), cyc: 2 + Math.floor(r() * 2), tx: lerp(0.018, 0.026, r()), roll: lerp(0.09, 0.14, r()),
+      yaw: lerp(0.03, 0.06, r()), lag: lerp(0.7, 1.3, r()), dir: sideOf(r), dip: r() }),
+    dur: p => p.cyc / p.f + 0.2,
+    eval(p, t, o, A) {
+      const D = p.cyc / p.f + 0.2, e = env(t, 0.3, D, 0.45) * A, s = e * p.dir, ph = TAU * p.f * t;
+      o.tx += Math.sin(ph) * p.tx * s;
+      o.roll += Math.sin(ph + 0.35) * p.roll * s;
+      o.yaw += Math.sin(ph - 0.4) * p.yaw * s;
+      o.ty += -(0.5 - 0.5 * Math.cos(2 * ph)) * (0.003 + 0.004 * p.dip) * e;
+      o.syaw += Math.sin(ph - p.lag) * 0.05 * s;
+      o.sroll += Math.sin(ph - p.lag * 0.8) * 0.05 * s;
+      o.tail += Math.sin(ph - 1.2) * 0.3 * s;
+    },
+  },
+  // zoomies prep: crouch, full-body high-frequency shimmy, tippy stomps, spring up
+  shimmy: {
+    make: r => ({ f: lerp(6.5, 8.5, r()), D: lerp(1.5, 2.1, r()), yaw: lerp(0.035, 0.055, r()), tap: lerp(2.8, 3.8, r()),
+      crouch: lerp(0.016, 0.024, r()), dir: sideOf(r) }),
+    dur: p => p.D,
+    eval(p, t, o, A) {
+      const D = p.D, c = sstep(0, 0.22, t) * (1 - sstep(D - 0.4, D - 0.12, t));
+      const se = sstep(0.12, 0.32, t) * (1 - sstep(D - 0.45, D - 0.18, t)) * A, s = se * p.dir, ph = TAU * p.f * t;
+      o.ty += -p.crouch * c * Math.min(A, 1.3) + bump(t, D - 0.12, 0.12) * 0.007 * A;
+      o.pitch += 0.05 * c;
+      o.yaw += Math.sin(ph) * p.yaw * s;
+      o.tx += Math.sin(ph + 0.4) * 0.005 * s;
+      o.roll += Math.sin(ph + 1.0) * 0.045 * s;
+      o.syaw += Math.sin(ph - 0.25) * p.yaw * 0.9 * s;
+      o.stx += Math.sin(ph) * 0.004 * s;
+      o.tail += Math.sin(ph + 0.5) * 0.4 * s;
+      const tp = TAU * p.tap * t;
+      o.liftL += Math.pow(Math.max(0, Math.sin(tp)), 2) * 0.009 * se;
+      o.liftR += Math.pow(Math.max(0, -Math.sin(tp)), 2) * 0.009 * se;
+    },
+  },
+  // little hop of the hind end, then a bouncy settle with a happy wiggle
+  hop: {
+    make: r => ({ H: lerp(0.032, 0.046, r()), tc: lerp(0.17, 0.24, r()), air: lerp(0.24, 0.3, r()), asym: lerp(-0.04, 0.04, r()),
+      wig: lerp(3.5, 5, r()), dir: sideOf(r), pitch: lerp(0.03, 0.07, r()) }),
+    dur: p => p.tc + p.air + 1.0,
+    eval(p, t, o, A) {
+      const c0 = -0.02 * Math.min(A, 1.4);
+      let y = 0, pitch = 0;
+      const tl = p.tc + p.air;
+      if (t < p.tc) { y = c0 * sstep(0, p.tc, t); pitch = 0.03 * sstep(0, p.tc, t); }
+      else if (t < tl) { const u = (t - p.tc) / p.air; y = lerp(c0, -0.008, u) + 4 * u * (1 - u) * p.H * A; pitch = lerp(0.03, -p.pitch, u); }
+      else { const u = t - tl; const k = Math.exp(-u * 4.2); y = -0.008 - 0.016 * Math.sin(u * 13) * k * A; pitch = -p.pitch * Math.cos(u * 11) * k; }
+      y *= 1 - sstep(p.tc + p.air + 0.75, p.tc + p.air + 1.0, t);
+      o.ty += y;
+      o.pitch += pitch;
+      const air = t > p.tc && t < tl ? Math.sin(Math.PI * (t - p.tc) / p.air) : 0;
+      o.liftL += Math.max(0, air * 0.012 * A * (1 + p.asym * 10));
+      o.liftR += Math.max(0, air * 0.012 * A * (1 - p.asym * 10));
+      o.fwdL += air * 0.006; o.fwdR += air * 0.006;
+      const u = Math.max(0, t - tl), w = Math.sin(TAU * p.wig * u) * Math.exp(-u * 3.2) * sstep(0, 0.08, u) * A * p.dir;
+      o.yaw += w * 0.07; o.tail += w * 0.5 + air * 0.25 * p.dir; o.roll += w * 0.03;
+      o.tailLift += air * 0.3;
+    },
+  },
+  // happy tippy-taps: alternate paw lifts with weight shifting onto the planted leg
+  taps: {
+    make: r => ({ f: lerp(2.4, 3.3, r()), n: 3 + Math.floor(r() * 3), lift: lerp(0.014, 0.021, r()), start: sideOf(r), sway: lerp(0.008, 0.013, r()) }),
+    dur: p => p.n / p.f + 0.25,
+    eval(p, t, o, A) {
+      const D = p.n / p.f + 0.25, e = env(t, 0.12, D, 0.3) * A, ph = TAU * p.f * t;
+      const l = Math.max(0, Math.sin(ph)), r = Math.max(0, -Math.sin(ph));
+      const a = p.start > 0 ? l : r, b = p.start > 0 ? r : l;
+      o.liftL += Math.pow(a, 1.5) * p.lift * e; o.liftR += Math.pow(b, 1.5) * p.lift * e;
+      o.fwdL += Math.pow(a, 1.5) * 0.008 * e; o.fwdR += Math.pow(b, 1.5) * 0.008 * e;
+      const sh = (Math.pow(b, 1.2) - Math.pow(a, 1.2)) * e;   // shift onto the planted leg
+      o.tx += sh * p.sway; o.roll += sh * 0.06; o.yaw += sh * 0.035;
+      o.tail += Math.sin(2 * ph) * 0.35 * e;
+      o.syaw += sh * 0.02;
+    },
+  },
+  // rump roll: hips trace a loop, a hula-ish figure with the tail counter-swinging
+  hula: {
+    make: r => ({ f: lerp(1.3, 1.9, r()), cyc: 2 + Math.floor(r() * 2), A: lerp(0.021, 0.028, r()), dir: sideOf(r), lag: lerp(0.5, 1.1, r()) }),
+    dur: p => p.cyc / p.f + 0.2,
+    eval(p, t, o, A) {
+      const D = p.cyc / p.f + 0.2, e = env(t, 0.25, D, 0.4) * A, ph = TAU * p.f * t * p.dir;
+      o.tx += Math.sin(ph) * p.A * e;
+      o.tz += Math.cos(ph) * p.A * 0.45 * e;
+      o.ty += (Math.cos(ph) * 0.5 - 0.5) * 0.011 * e;
+      o.roll += Math.sin(ph + 0.6) * 0.13 * e;
+      o.yaw += Math.cos(ph) * 0.075 * e;
+      o.pitch += Math.cos(ph) * 0.05 * e;
+      o.syaw += Math.sin(ph - p.lag) * 0.05 * e;
+      o.tail += Math.sin(2 * ph + 1) * 0.4 * e;
+    },
+  },
+  // shake-off: a rolling shake travelling from the front of the body to the rump
+  shake: {
+    make: r => ({ f: lerp(4.4, 5.6, r()), D: lerp(0.85, 1.2, r()), roll: lerp(0.15, 0.22, r()), dir: sideOf(r) }),
+    dur: p => p.D + 0.35,
+    eval(p, t, o, A) {
+      const e = Math.pow(Math.sin(Math.PI * clamp(t / p.D, 0, 1)), 1.4) * A, s = e * p.dir, ph = TAU * p.f * t;
+      o.sroll += Math.sin(ph) * p.roll * 0.9 * s;
+      o.roll += Math.sin(ph - 0.75) * p.roll * s;
+      o.yaw += Math.sin(ph - 0.75 + 1.57) * 0.035 * s;
+      o.syaw += Math.sin(ph + 1.57) * 0.025 * s;
+      o.tail += Math.sin(ph - 1.3) * 0.5 * s;
+      o.ty += -0.005 * e;
+      const st = Math.max(0, t - p.D);
+      o.ty += -Math.sin(st * 12) * Math.exp(-st * 6) * 0.004 * A;
+    },
+  },
+};
+const WIGGLE_NAMES = Object.keys(WIGGLES);
+
+const behaviour = {
+  time: 0, excite: 0, active: [], last: null,
+  breathPhase: 0,
+  shift: 0, shiftV: 0, shiftTarget: 0, nextShift: 1.5 + 3 * rngIdle(),
+  twitchAt: 3 + 5 * rngIdle(), twitchT: -1, twitchDir: 1,
+};
+function triggerWiggle(forced) {
+  const b = behaviour;
+  b.excite = Math.min(b.excite + 0.38, 1.6);
+  const r = rngWiggle;
+  const pickR = r();
+  let name = forced;
+  if (!WIGGLES[name]) {
+    const choices = WIGGLE_NAMES.filter(n => n !== b.last);
+    name = choices[Math.floor(pickR * choices.length) % choices.length];
+  }
+  const p = WIGGLES[name].make(r);
+  const E = Math.min(b.excite, 1.3);
+  const amp = lerp(0.85, 1.12, r()) * (1 + 0.5 * E);
+  const speed = lerp(0.9, 1.12, r()) * (1 + 0.28 * E);
+  for (const w of b.active) if (w.fade < 0) w.fade = b.time;
+  b.active.push({ name, p, t0: b.time, amp, speed, fade: -1 });
+  b.last = name;
+}
+function updateBehaviour(dt, P) {
+  const b = behaviour;
+  b.time += dt;
+  b.excite *= Math.exp(-dt / 2.4);
+  for (const k of POSE_KEYS) P[k] = 0;
+  // breathing (pants when excited)
+  const pant = sstep(0.25, 1.1, b.excite);
+  b.breathPhase += TAU * lerp(0.32, 2.6, pant) * dt;
+  const br = Math.sin(b.breathPhase);
+  furUniforms.uBreath.value = br * lerp(0.0028, 0.0018, pant);
+  P.ty += br * 0.0007;
+  // tiny postural sway
+  P.yaw += 0.006 * Math.sin(b.time * 0.71) + 0.004 * Math.sin(b.time * 1.13 + 1.0);
+  P.roll += 0.005 * Math.sin(b.time * 0.53 + 2.0);
+  // occasional weight shifts between the hind legs
+  if (b.time > b.nextShift) {
+    const r = rngIdle();
+    b.shiftTarget = r < 0.3 ? 0 : (r < 0.65 ? -1 : 1) * (0.55 + 0.45 * rngIdle());
+    b.nextShift = b.time + 2.5 + 5 * rngIdle();
+  }
+  const w = 3.2;
+  b.shiftV += (w * w * (b.shiftTarget - b.shift) - 2 * w * b.shiftV) * dt;
+  b.shift += b.shiftV * dt;
+  P.tx += b.shift * 0.008;
+  P.roll += b.shift * 0.035;
+  P.yaw += b.shift * 0.012;
+  P.syaw += b.shift * 0.006;
+  // tail stub twitches; a contented wag while still excited
+  if (b.time > b.twitchAt) { b.twitchT = 0; b.twitchDir = rngIdle() < 0.5 ? -1 : 1; b.twitchAt = b.time + 3 + 6 * rngIdle(); }
+  if (b.twitchT >= 0) { b.twitchT += dt; P.tail += Math.sin(b.twitchT * 38) * Math.exp(-b.twitchT * 5) * 0.22 * b.twitchDir; if (b.twitchT > 1.2) b.twitchT = -1; }
+  P.tail += Math.sin(b.time * TAU * 4.6) * 0.28 * sstep(0.1, 0.9, b.excite);
+  P.yaw += Math.sin(b.time * TAU * 2.2) * 0.012 * sstep(0.3, 1.2, b.excite);
+  // active wiggles (additive layers with cross-fades)
+  const tmp = behaviour.tmp || (behaviour.tmp = {});
+  for (let i = b.active.length - 1; i >= 0; i--) {
+    const W = b.active[i], def = WIGGLES[W.name];
+    const lt = (b.time - W.t0) * W.speed;
+    let wt = 1;
+    if (W.fade >= 0) wt = 1 - sstep(0, 0.28, b.time - W.fade);
+    if (lt > def.dur(W.p) || wt <= 0) { b.active.splice(i, 1); continue; }
+    for (const k of POSE_KEYS) tmp[k] = 0;
+    def.eval(W.p, lt, tmp, W.amp);
+    for (const k of POSE_KEYS) P[k] += tmp[k] * wt;
+  }
+  P.tx = clamp(P.tx, -0.035, 0.035); P.tz = clamp(P.tz, -0.02, 0.02); P.ty = clamp(P.ty, -0.032, 0.06);
+  P.yaw = clamp(P.yaw, -0.17, 0.17); P.roll = clamp(P.roll, -0.26, 0.26); P.pitch = clamp(P.pitch, -0.12, 0.12);
+  P.syaw = clamp(P.syaw, -0.1, 0.1); P.sroll = clamp(P.sroll, -0.22, 0.22); P.tail = clamp(P.tail, -0.8, 0.8);
+  P.liftL = clamp(P.liftL, 0, 0.03); P.liftR = clamp(P.liftR, 0, 0.03);
+}
+
+/* =====================================================================
+   Camera orbit (360° azimuth, 3°..70° elevation, fixed distance, no zoom)
+   ===================================================================== */
+const TARGET = new THREE.Vector3(0, 0.145, -0.1);
+const CAM_DIST = 0.93;
+const EL_MIN = THREE.MathUtils.degToRad(3), EL_MAX = THREE.MathUtils.degToRad(70);
+const orbit = { az: THREE.MathUtils.degToRad(12), el: THREE.MathUtils.degToRad(17), vAz: 0, vEl: 0 };
+function placeCamera() {
+  // elevation is measured at the ground point below the target, so 3° really sits just above the floor
+  const h = TARGET.y, ce = Math.cos(orbit.el), se = Math.sin(orbit.el);
+  const rg = h * se + Math.sqrt(CAM_DIST * CAM_DIST - h * h * ce * ce);
+  camera.position.set(TARGET.x + Math.sin(orbit.az) * ce * rg, se * rg, TARGET.z + Math.cos(orbit.az) * ce * rg);
+  camera.lookAt(TARGET);
+}
+
+let drag = null, hoverXY = null;
+const raycaster = new THREE.Raycaster();
+const _ndc = new THREE.Vector2(), _ro = new THREE.Vector3(), _rd = new THREE.Vector3(), _inv = new THREE.Matrix4();
+function march(o, d) {
+  let t = 0;
+  for (let i = 0; i < 160 && t < 4; i++) {
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+    const s = sdf(x, y, z) - 0.024;
+    if (s < 0.0015) return z > -0.25 && y > -0.01;
+    t += Math.max(s * 0.9, 0.0015);
+  }
+  return false;
+}
+function hitDog(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  _ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(_ndc, camera);
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;
+  if (march(o, d)) return true;
+  _inv.copy(boneMats[0]).invert();
+  _ro.copy(o).applyMatrix4(_inv);
+  _rd.copy(d).transformDirection(_inv);
+  return march(_ro, _rd);
+}
+canvas.addEventListener('pointerdown', e => {
+  if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  canvas.setPointerCapture(e.pointerId);
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, lt: performance.now(), t: performance.now(), moved: false };
+  orbit.vAz = orbit.vEl = 0;
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) { hoverXY = [e.clientX, e.clientY]; return; }
+  const now = performance.now();
+  const dx = e.clientX - drag.lx, dy = e.clientY - drag.ly;
+  drag.lx = e.clientX; drag.ly = e.clientY;
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 5) { drag.moved = true; canvas.style.cursor = 'grabbing'; }
+  if (drag.moved) {
+    const k = Math.PI / Math.max(320, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.95);
+    orbit.az -= dx * k;
+    orbit.el = clamp(orbit.el + dy * k, EL_MIN, EL_MAX);
+    const dtm = Math.max(8, now - drag.lt) / 1000;
+    orbit.vAz = lerp(orbit.vAz, -dx * k / dtm, 0.5);
+    orbit.vEl = lerp(orbit.vEl, dy * k / dtm, 0.5);
+  }
+  drag.lt = now;
+});
+const endDrag = (e, cancelled) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const wasClick = !drag.moved && performance.now() - drag.t < 700;
+  if (performance.now() - drag.lt > 80) orbit.vAz = orbit.vEl = 0;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  drag = null;
+  canvas.style.cursor = 'grab';
+  hoverXY = [e.clientX, e.clientY];
+  if (!cancelled && wasClick && hitDog(e.clientX, e.clientY)) triggerWiggle();
+};
+canvas.addEventListener('pointerup', e => endDrag(e, false));
+canvas.addEventListener('pointercancel', e => endDrag(e, true));
+canvas.addEventListener('pointerleave', () => { hoverXY = null; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+/* =====================================================================
+   Sizing, adaptive quality, main loop
+   ===================================================================== */
+function resize() {
+  const w = Math.max(1, document.documentElement.clientWidth), h = Math.max(1, document.documentElement.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY[qLevel].dpr));
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const base = 30;
+  camera.fov = w >= h ? base : THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(base / 2)) / camera.aspect));
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(document.documentElement);
+window.addEventListener('resize', resize);
+resize();
+
+const perf = { samples: [], lastChange: 0, fps: 0, frames: 0, acc: 0 };
+function setQuality(level) {
+  qLevel = clamp(level, 0, QUALITY.length - 1);
+  applyShellCounts();
+  resize();
+}
+function trackPerf(intervalMs, nowMs) {
+  perf.acc += intervalMs; perf.frames++;
+  if (perf.acc >= 1000) { perf.fps = perf.frames * 1000 / perf.acc; perf.acc = 0; perf.frames = 0; }
+  // Only downgrade on sustained, clearly-slow rendering (well below 30 fps), never on hitches.
+  if (document.visibilityState !== 'visible' || intervalMs > 250) return;
+  perf.samples.push(intervalMs);
+  if (perf.samples.length < 150) return;
+  const sorted = perf.samples.slice().sort((a, b) => a - b), median = sorted[sorted.length >> 1];
+  perf.samples.length = 0;
+  if (median > 40 && nowMs - perf.lastChange > 4000 && qLevel < QUALITY.length - 1) { perf.lastChange = nowMs; setQuality(qLevel + 1); }
+}
+
+function simulate(dt) {
+  updateBehaviour(dt, pose);
+  applyPose(pose);
+  updateSprings(dt);
+  updateProxies();
+}
+let lastT = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const interval = now - lastT;
+  lastT = now;
+  trackPerf(interval, now);
+  const dt = Math.min(interval / 1000, 1 / 20);
+  if (!drag) {
+    orbit.az += orbit.vAz * dt;
+    orbit.el = clamp(orbit.el + orbit.vEl * dt, EL_MIN, EL_MAX);
+    const k = Math.exp(-dt * 5);
+    orbit.vAz *= k; orbit.vEl *= k;
+  }
+  placeCamera();
+  if (dt > 0) simulate(dt);
+  if (hoverXY && !drag) { canvas.style.cursor = hitDog(hoverXY[0], hoverXY[1]) ? 'pointer' : 'grab'; hoverXY = null; }
+  renderer.render(scene, camera);
+}
+applyPose(pose);
+updateProxies();
+placeCamera();
+requestAnimationFrame(frame);
+
+// small read-only handle for embedding pages / testing
+window.corgi = {
+  seed: seedStr, coat,
+  get fps() { return perf.fps; },
+  get quality() { return qLevel; },
+  get excitement() { return behaviour.excite; },
+  wiggle: name => triggerWiggle(name),
+};
+</script>
+</body>
+</html>
