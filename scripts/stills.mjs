@@ -12,7 +12,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const SEED = 1;            // same seed for every still, so the coats differ only in colour
+const SEED = 1;            // same seed for every still, so the coats differ only in colour; index.html's STILL_SEED must match
 const SETTLE_MS = 4000;    // time for three.js to load from the CDN and the scene to settle
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml' };
 

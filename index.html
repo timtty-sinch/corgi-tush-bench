@@ -195,6 +195,7 @@
 const RUNS_ORIGIN = '__RUNS_ORIGIN__'.startsWith('__') ? '' : '__RUNS_ORIGIN__';
 const MAX_LIVE = 4; // compare and vote views, which run their entries side by side
 const MAX_COMPARE = 4;
+const STILL_SEED = '1'; // the seed scripts/stills.mjs captures with (its SEED), so a still and its live render match
 const COATS = [['random', 'Random'], ['red', 'Red and white'], ['sable', 'Sable'], ['tri', 'Tricolor'], ['bht', 'Black-headed tricolor']];
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -212,9 +213,10 @@ const h = (tag, attrs = {}, ...kids) => {
 
 let manifest, runs = [];
 const q = new URLSearchParams(location.search);
+const seedInUrl = /^\d+$/.test(q.get('seed') || '');
 const state = {
   coat: COATS.some(c => c[0] === q.get('coat')) ? q.get('coat') : 'random',
-  seed: /^\d+$/.test(q.get('seed') || '') ? q.get('seed') : String(Math.floor(Math.random() * 1e6)),
+  seed: seedInUrl ? q.get('seed') : String(Math.floor(Math.random() * 1e6)),
   version: q.get('v') || 'all',
   compare: (q.get('compare') || '').split(',').filter(Boolean),
   run: q.get('run'),
@@ -232,7 +234,8 @@ function syncUrl() {
   else if (state.compare.length) p.set('compare', state.compare.join(','));
   else if (state.version !== 'all') p.set('v', state.version);
   if (state.coat !== 'random') p.set('coat', state.coat);
-  if (state.run || state.compare.length) p.set('seed', state.seed);
+  if (state.run) p.set('seed', seedInUrl ? state.seed : STILL_SEED);
+  else if (state.compare.length) p.set('seed', state.seed);
   const s = p.toString();
   history.replaceState(null, '', s ? '?' + s : location.pathname);
 }
@@ -301,6 +304,8 @@ function stageFor(run, { autoplay = false } = {}) {
     'Load live render', img, h('span', { class: 'play', 'aria-hidden': 'true', text: '\u25B6 Play live' }));
   const stage = h('div', { class: 'stage' }, h('span', { class: 'armband', 'aria-label': 'Entry ' + entryNo(run), text: entryNo(run) }), ph);
   stage._run = run; stage._placeholder = ph;
+  // A pane that starts as a still plays with the still's seed, unless the link asked for a seed.
+  if (!autoplay && !seedInUrl) stage._seed = STILL_SEED;
   if (autoplay) queueMicrotask(() => load(stage));
   return stage;
 }
