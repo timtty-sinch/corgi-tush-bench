@@ -131,6 +131,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run in the ChatGPT web app on the free tier. The app does not show the exact model snapshot or thinking setting behind GPT-6, so effort is null. Delivered as corgi_rear_wiggle.html. Three.js r160: ellipsoid body with individual cone fur strands, seeded mulberry32 RNG. Checked in headless Chrome at 400x400 DPR 2 from file://: loads with no console errors, all four coats render distinctly from #seed/#coat, and a click at canvas centre triggers a wiggle. Wall time, tokens and cost were not recorded."
+    },
+    {
+      "id": "opus-5-5-high-20261016",
+      "model": { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "provider": "Anthropic" },
+      "harness": { "name": "Claude Code", "version": "2.1.302" },
+      "effort": "high",
+      "date": "2026-10-16",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": 57,
+      "tokens": { "input": 31346133, "output": 286639 },
+      "cost_usd": null,
+      "file": "runs/opus-5-5-high-20261016/index.html",
+      "sha256": "1bb99bd3e40e17e9b284ad4a3abc072e808860add079d75eb043e019842eabe2",
+      "three_version": "0.160.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run in Claude Code 2.1.302 with /effort high; prompt verified byte-identical to prompts/v1.md. Delivered as corgi.html. Three.js r160: surface-nets SDF body with skinned IK legs, 36 instanced fur shells (18 inner on the whole body, 18 outer only on long fur), seeded sfc32 sub-streams, 7 wiggle types with excitement build-up, spring jiggle on pants/rump/belly. The cropped front is drawn first and faded as a unit, with the rear composited over or under it depending on camera side, so it dissolves without a hard edge from any angle. Self-checked in headless Chrome at 400x400 DPR 2 on an Apple M4: no console errors, about 5.5 ms GPU per frame and no dropped frames during repeated wiggles; not measured on an M1. Keeps a window.corgi hook (seed, coat, last, wiggle, view, quality). Wall time is first prompt to final reply from the session transcript. Tokens are summed from the transcript's per-message usage; input includes cache reads (30,977,891) and cache writes (368,028). Cost was not reported by the harness."
     }
   ]
 }
