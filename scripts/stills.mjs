@@ -14,6 +14,7 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const SEED = 1;            // same seed for every still, so the coats differ only in colour; index.html's STILL_SEED must match
 const SETTLE_MS = 4000;    // time for three.js to load from the CDN and the scene to settle
+const SHOT_MS = 240000;    // heavy runs take about 2 min per frame under SwiftShader on a CI runner
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml' };
 
 const args = process.argv.slice(2);
@@ -57,7 +58,7 @@ try {
       try {
         await page.goto(origin + run.file + (hash ? '#' + hash : ''), { waitUntil: 'load', timeout: 30000 });
         await page.waitForTimeout(SETTLE_MS);
-        await page.screenshot({ path: out, type: 'jpeg', quality: 82 });
+        await page.screenshot({ path: out, type: 'jpeg', quality: 82, timeout: SHOT_MS });
         made++;
         console.log(`${run.id} ${coat}${errors.length ? ' (page errors: ' + errors.join('; ') + ')' : ''}`);
       } catch (e) {
