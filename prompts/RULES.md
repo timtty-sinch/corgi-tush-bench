@@ -39,3 +39,4 @@ Use `<model-slug>-<effort>-<yyyymmdd>`, e.g. `opus-5-5-high-20261009`. Leave out
 1. Put the delivered file at `runs/<id>/index.html`, unedited.
 2. Add an entry to `manifest.json` (see `manifest.schema.json`). Set `sha256` to the file's hash (`shasum -a 256 runs/<id>/index.html`), and use `null` for anything you don't know.
 3. For v1 runs, set `params` to `{"seed": true, "coat": {"red":"red","sable":"sable","tri":"tri","bht":"bht"}}`. Only v0 runs need a custom coat map.
+4. Capture the stills locally with `npm run stills -- <id>` (after `npm install` and `npx playwright install chromium`) and commit `runs/<id>/stills/` with the entry. PRs without stills are not accepted.
