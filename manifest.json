@@ -185,6 +185,24 @@
       "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
       "scores": null,
       "notes": "v1 run in Gemini CLI on the free tier, started as a Gemini 3 Pro run. The session summary shows gemini-3.1-pro-preview with 1 request and 0 tokens, and all 23 working requests on gemini-3-flash-preview, so the entry is recorded as Flash. The harness does not show a thinking setting, so effort is null. Harness version is the Gemini CLI installed on the run machine at submission time. wall_min is the session's wall time (56m 9s); agent active time was 11m 23s. Tokens are from the session summary; the harness lists 354,618 cache reads separately from input. No cost because the run used the free tier. Three.js r160 with a seeded mulberry32 RNG and #seed/#coat handling. Checked in headless Chrome at 400x400 DPR 2 from file://: all four coats load with no console output. The default view renders as a soft, grainy fur dome."
+    },
+    {
+      "id": "gpt-6-1-sol-xhigh-20261017",
+      "model": { "id": "us.openai.gpt-6.1-sol", "name": "GPT-6.1 Sol", "provider": "OpenAI (via Amazon Bedrock)" },
+      "harness": { "name": "opencode", "version": "2.0.30" },
+      "effort": "xhigh",
+      "date": "2026-10-17",
+      "prompt_version": "v1",
+      "first_try": true,
+      "wall_min": 36,
+      "tokens": { "input": 3408649, "output": 106638 },
+      "cost_usd": 1.93,
+      "file": "runs/gpt-6-1-sol-xhigh-20261017/index.html",
+      "sha256": "d83c9e0e0951118b31aee4fa6d2b8f2464fb2708640775a5a36121e68133edaa",
+      "three_version": "0.170.0",
+      "params": { "seed": true, "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" } },
+      "scores": null,
+      "notes": "v1 run in opencode 2.0.30 (build agent) on the amazon-bedrock provider. Model id us.openai.gpt-6.1-sol and variant xhigh are read from every assistant message in the opencode session store (~/.local/share/opencode/opencode.db, session ses_eb6fd377effePTaoDvL0UdUSrx). The pasted prompt matches prompts/v1.md except that it ends in a single trailing space instead of the final newline. The harness started in its own empty run folder; the model read only its own corgi.html and its own screenshots in a temp folder, and installed Playwright to that temp folder. One user message and no operator messages after delivery. Delivered as corgi.html. wall_min is first prompt (08:38:01 UTC) to final reply (09:13:46 UTC), 35.7 minutes. Tokens are summed over the 49 assistant requests in the session store: input is 16,156 uncached plus 3,260,427 cache-read and 132,066 cache-write; output is 106,638, with reasoning reported as 0. The session row's own totals are slightly higher (input 16,158, output 106,655, cache read 3,261,998). cost_usd is the cost opencode reported for the session ($1.9304). Checked in headless Chrome at 400x400 DPR 2 from file://: all four coats load with no console output, and a click at the canvas centre starts a wiggle. The model reported about 60 fps on an M4 Pro; not measured on an M1."
     }
   ]
 }
