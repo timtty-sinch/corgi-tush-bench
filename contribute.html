@@ -147,7 +147,11 @@
   "seed": true,
   "coat": { "red": "red", "sable": "sable", "tri": "tri", "bht": "bht" }
 }</pre></li>
-    <li>Open a pull request with the file and the manifest change.</li>
+    <li>Capture the stills on your machine, one per coat, into <code>runs/&lt;id&gt;/stills/</code>. A pull request without them won't be accepted.
+<pre>npm install
+npx playwright install chromium
+npm run stills -- &lt;id&gt;</pre></li>
+    <li>Open a pull request with the file, the manifest change and the stills.</li>
   </ol>
 
   <h2>What happens next</h2>

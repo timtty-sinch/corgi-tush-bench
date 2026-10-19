@@ -61,8 +61,17 @@ work around.
    `python3 -m http.server 8000` in the repo root, open `http://localhost:8000`, and check that the
    entry is listed and renders, and that a click at the canvas centre starts a wiggle. Use this to set
   `first_try` (see below); don't use it to fix anything.
-7. **Commit** the file and the manifest change together: `Add run: <model name>, prompt v1 (<id>)`.
-8. **Open a pull request** against `main`, with the body described below.
+7. **Capture the stills** on your machine. A PR without them won't be accepted; nothing generates
+   them after merge.
+   ```sh
+   npm install && npx playwright install chromium
+   npm run stills -- <id>
+   ```
+   This writes one JPEG per coat to `runs/<id>/stills/` (`default.jpg`, `red.jpg`, `sable.jpg`,
+   `tri.jpg`, `bht.jpg` for v1). It must end with `5 stills captured.` and no failures. Open each
+   image and check it shows the render, not a blank or half-loaded page.
+8. **Commit** the file, the manifest change and the stills together: `Add run: <model name>, prompt v1 (<id>)`.
+9. **Open a pull request** against `main`, with the body described below.
 
 ## The manifest entry
 
@@ -97,12 +106,13 @@ In the body, give the evidence for each check, so the reviewer can confirm it wi
 - the file's sha256, and confirmation that it was only moved
 - how wall time and tokens were measured
 - what `first_try` is based on: browser, viewport and what you clicked
+- that the stills were captured with `npm run stills -- <id>`, and on what machine
 - anything that went differently from the rules above
 
 ## What not to do
 
 - Don't edit the delivered file, including whitespace, formatting or a fix for an obvious bug.
-- Don't add stills. After the merge, the "Run stills" GitHub Action captures any that are missing.
+- Don't leave out the stills, and don't edit them by hand. They come from `scripts/stills.mjs` only.
 - Don't touch other entries, the prompts, the schema or the site pages in a run PR. Raise those
   changes separately.
 - Don't add hosting, deployment or server material. This repo holds the benchmark and the static

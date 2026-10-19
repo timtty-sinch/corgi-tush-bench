@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="color-scheme" content="light">
+  <title></title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #e8e3da; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; outline: none; -webkit-tap-highlight-color: transparent; }
+  </style>
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// One stream supplies every visible random decision. Arbitrarily large integer
+// seeds are hashed as decimal strings rather than rounded to JavaScript numbers.
+const params = new URLSearchParams(location.hash.slice(1));
+let seed;
+if (/^\d+$/.test(params.get('seed') ?? '')) {
+  try { seed = BigInt(params.get('seed')).toString(); } catch (_) { /* Ignore invalid seeds. */ }
+}
+if (seed === undefined) {
+  const words = crypto.getRandomValues(new Uint32Array(2));
+  seed = ((BigInt(words[0]) << 32n) | BigInt(words[1])).toString();
+}
+function seededStream(text) {
+  let a = 1779033703, b = 3144134277, c = 1013904242, d = 2773480762;
+  for (let i = 0; i < text.length; i++) {
+    const k = text.charCodeAt(i);
+    a = b ^ Math.imul(a ^ k, 597399067);
+    b = c ^ Math.imul(b ^ k, 2869860233);
+    c = d ^ Math.imul(c ^ k, 951274213);
+    d = a ^ Math.imul(d ^ k, 2716044179);
+  }
+  a = Math.imul(c ^ (a >>> 18), 597399067);
+  b = Math.imul(d ^ (b >>> 22), 2869860233);
+  c = Math.imul(a ^ (c >>> 17), 951274213);
+  d = Math.imul(b ^ (d >>> 19), 2716044179);
+  a = (a ^ b ^ c ^ d) >>> 0; b = (b ^ a) >>> 0;
+  c = (c ^ a) >>> 0; d = (d ^ a) >>> 0;
+  return () => {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+    let t = (a + b) | 0;
+    a = b ^ (b >>> 9); b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11); d = (d + 1) | 0;
+    t = (t + d) | 0; c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+const random = seededStream(seed);
+for (let i = 0; i < 16; i++) random();
+const coats = ['red', 'sable', 'tri', 'bht'];
+const seededCoat = coats[Math.floor(random() * coats.length)];
+const coat = coats.includes(params.get('coat')) ? params.get('coat') : seededCoat;
+const TAU = Math.PI * 2;
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const mix = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const vec = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+
+// A continuous, seeded pigment/grooming field, not an image texture.
+const phases = Array.from({ length: 12 }, () => random() * TAU);
+function noise(x, y, z) {
+  return Math.sin(x * 8.1 + Math.sin(z * 4.7 + phases[0]) + phases[1]) *
+    Math.sin(y * 10.3 + z * 6.2 + phases[2]) * 0.52 +
+    Math.sin(x * 21.7 + y * 19.2 + phases[3]) * Math.sin(z * 23.1 + phases[4]) * 0.27 +
+    Math.sin(x * 48.1 - y * 37.6 + z * 42.3 + phases[5]) * 0.12;
+}
+const pigmentShift = random() * 0.18 - 0.09;
+const markingShift = random() * 0.035 - 0.0175;
+const linear = hex => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+const honey = linear('#ce8847'), russet = linear('#a95729');
+const cream = linear('#f2ecdf'), biscuit = linear('#deccac');
+const coal = linear('#242323'), darkSable = linear('#594438');
+function pigment(x, y, z, part, variation = 0.5) {
+  const n = noise(x, y, z);
+  const rear = smooth(-0.25, 0.48, z);
+  const ax = Math.abs(x);
+  let border = 0.602 + rear * (0.205 + 0.075 * smooth(0.12, 0.56, ax));
+  border += 0.065 * rear * Math.exp(-(((ax - 0.34) / 0.18) ** 2));
+  border += n * 0.035 + markingShift;
+  let white = 1 - smooth(border - 0.028, border + 0.035, y);
+  if (part === 2 || part === 6) {
+    const tanHip = smooth(0.39, 0.69, y) * (1 - smooth(0.25 + n * 0.025, 0.45 + n * 0.025, z));
+    white = 1 - tanHip;
+  }
+  if ([3, 4, 5, 7, 8, 9].includes(part)) white = 1;
+  if (part === 10) white = smooth(0.706, 0.745, z) * 0.24;
+  const redMix = clamp(0.28 + n * 0.16 + pigmentShift + (variation - 0.5) * 0.14);
+  const red = honey.map((v, i) => mix(v, russet[i], redMix));
+  let dark = 0;
+  if (coat === 'sable') {
+    dark = smooth(0.79, 1.22, y) * (0.36 + 0.40 * smooth(0.45, -1.10, z));
+    dark += smooth(0.81, 0.94, variation) * smooth(0.65, 1.08, y) * 0.38;
+  } else if (coat === 'tri' || coat === 'bht') {
+    const saddle = coat === 'bht' ? 0.82 : 0.95;
+    const line = saddle - 0.115 * smooth(0.2, -1.2, z) + 0.12 * rear - 0.11 * smooth(0.22, 0.57, ax);
+    dark = smooth(line - 0.07 + n * 0.04, line + 0.055 + n * 0.04, y);
+    if (part === 10) dark = coat === 'bht' ? 0.9 : 0.45;
+  }
+  const darkColor = coat === 'sable' ? darkSable : coal;
+  const warmWhite = clamp(0.025 + (1 - smooth(0.24, 0.91, y)) * 0.10 + n * 0.038);
+  const brightness = 0.92 + variation * 0.13 + n * 0.045;
+  return red.map((v, i) => mix(mix(v, darkColor[i], clamp(dark)), mix(cream[i], biscuit[i], warmWhite), white) * brightness);
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.03;
+renderer.setClearColor('#e8e3da');
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const canvas = renderer.domElement;
+canvas.setAttribute('aria-label', 'Interactive rear view of a Pembroke Welsh Corgi. Drag to orbit; tap the dog to make it wiggle.');
+canvas.dataset.seed = seed;
+canvas.dataset.coat = coat;
+document.body.appendChild(canvas);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#e8e3da');
+scene.fog = new THREE.Fog('#e8e3da', 9, 26);
+const camera = new THREE.PerspectiveCamera(39, 1, 0.04, 40);
+const orbitRadius = 4.70;
+camera.position.set(0, orbitRadius * Math.sin(20 * Math.PI / 180), orbitRadius * Math.cos(20 * Math.PI / 180) - 0.34);
+const controls = new OrbitControls(camera, canvas);
+// Orbit the floor, but look at the loaf: at the lower stop the camera really is
+// 22 cm above the floor, so the belly, bent hocks and space between legs show.
+controls.target.set(0, 0, -0.34);
+controls.enableZoom = false;
+controls.enablePan = false;
+controls.enableDamping = true;
+controls.dampingFactor = 0.11;
+controls.rotateSpeed = 0.75;
+controls.minPolarAngle = 20 * Math.PI / 180;
+controls.maxPolarAngle = 87 * Math.PI / 180;
+const focus = vec(0, 0.66, -0.34);
+camera.lookAt(focus);
+
+scene.add(new THREE.HemisphereLight('#fff4dd', '#a49b8e', 1.35));
+const sun = new THREE.DirectionalLight('#fff0d8', 2.0);
+sun.position.set(-3.2, 5.5, 4.0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -2.6; sun.shadow.camera.right = 2.6;
+sun.shadow.camera.top = 2.8; sun.shadow.camera.bottom = -2.3;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 12;
+sun.shadow.normalBias = 0.025;
+sun.shadow.bias = -0.00015;
+sun.shadow.radius = 3;
+scene.add(sun);
+const fill = new THREE.DirectionalLight('#e4ebf3', 0.55);
+fill.position.set(3, 2, -3); scene.add(fill);
+
+const bones = Array.from({ length: 11 }, () => new THREE.Matrix4());
+const lags = [vec(), vec(), vec()];
+const uniforms = {
+  uBones: { value: bones },
+  uLag: { value: lags },
+  uTime: { value: 0 }
+};
+// Full-density fur is bandwidth sensitive on integrated GPUs. Unit vectors and
+// colors use normalized 16-bit attributes (sub-pixel precision), while roots,
+// strand dimensions and all physics retain float precision. No strands are lost.
+function packedAttribute(values, size, signed = false) {
+  const packed = signed ? new Int16Array(values.length) : new Uint16Array(values.length);
+  const scale = signed ? 32767 : 65535;
+  for (let i = 0; i < values.length; i++) packed[i] = Math.round(clamp(values[i], signed ? -1 : 0, 1) * scale);
+  return new THREE.BufferAttribute(packed, size, true);
+}
+const skinPositions = [], skinNormals = [], skinColors = [], skinParts = [], skinFades = [], skinIndices = [];
+const surfaces = [];
+
+// Parametric anatomy is continuous and asymmetric in profile: a long loin,
+// a rounded pelvis, caudal feathering, forward stifles and rear-facing hocks.
+function surface(fn, nu, nv, part, hairs, type, overrideColor, furOnly = false) {
+  const p = [], n = [], index = [];
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    const u = i / nu, v = j / nv;
+    const a = fn(u, v);
+    const du = fn(u + 0.0001, v).sub(fn(u - 0.0001, v));
+    const dv = fn(u, Math.min(0.99999, v + 0.0001)).sub(fn(u, Math.max(0.00001, v - 0.0001)));
+    const normal = du.cross(dv).normalize();
+    if (normal.lengthSq() < 0.1) normal.set(0, v < 0.5 ? 1 : -1, 0);
+    p.push(a.x, a.y, a.z); n.push(normal.x, normal.y, normal.z);
+  }
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = j * (nu + 1) + i, b = a + nu + 1;
+    index.push(a, a + 1, b, a + 1, b + 1, b);
+  }
+  if (furOnly) {
+    surfaces.push({ p, n, index, part, hairs, type });
+    return;
+  }
+  const offset = skinPositions.length / 3;
+  for (let i = 0; i < p.length; i += 3) {
+    const color = overrideColor || pigment(p[i], p[i + 1], p[i + 2], part);
+    skinPositions.push(p[i], p[i + 1], p[i + 2]);
+    skinNormals.push(n[i], n[i + 1], n[i + 2]); skinColors.push(...color);
+    skinParts.push(part);
+    skinFades.push(part <= 1 ? smooth(-1.68, -0.89, p[i + 2]) : 1);
+  }
+  skinIndices.push(...index.map(i => i + offset));
+  if (hairs) surfaces.push({ p, n, index, part, hairs, type });
+}
+function ellipsoid(center, radius, part, hairs, type = 'body', deform, overrideColor) {
+  surface((u, v) => {
+    const theta = v * Math.PI, phi = u * TAU;
+    const p = vec(center.x + radius.x * Math.sin(theta) * Math.cos(phi),
+      center.y + radius.y * Math.cos(theta), center.z + radius.z * Math.sin(theta) * Math.sin(phi));
+    return deform ? deform(p, theta, phi) : p;
+  }, 40, 24, part, hairs, type, overrideColor);
+}
+const stations = [
+  [-2.06, 0.001, 0.002, 0.91], [-1.79, 0.45, 0.33, 0.90], [-1.57, 0.465, 0.34, 0.90],
+  [-1.22, 0.47, 0.345, 0.89], [-0.78, 0.51, 0.365, 0.88],
+  [-0.30, 0.565, 0.40, 0.875], [0.12, 0.605, 0.425, 0.865],
+  [0.40, 0.56, 0.395, 0.85], [0.61, 0.425, 0.31, 0.815],
+  [0.735, 0.22, 0.17, 0.78], [0.79, 0.001, 0.002, 0.755]
+];
+function section(z, column) {
+  let i = 0;
+  while (i < stations.length - 2 && z > stations[i + 1][0]) i++;
+  const a = stations[i], b = stations[i + 1];
+  const t = clamp((z - a[0]) / (b[0] - a[0]));
+  const prev = stations[Math.max(0, i - 1)], next = stations[Math.min(stations.length - 1, i + 2)];
+  const m0 = (b[column] - prev[column]) / (b[0] - prev[0]) * (b[0] - a[0]);
+  const m1 = (next[column] - a[column]) / (next[0] - a[0]) * (b[0] - a[0]);
+  return (2 * t ** 3 - 3 * t * t + 1) * a[column] + (t ** 3 - 2 * t * t + t) * m0 +
+    (-2 * t ** 3 + 3 * t * t) * b[column] + (t ** 3 - t * t) * m1;
+}
+surface((u, v) => {
+  const z = mix(-2.06, 0.79, v), angle = u * TAU;
+  const rx = Math.max(0.001, section(z, 1)), ry = Math.max(0.001, section(z, 2));
+  const x = rx * Math.cos(angle);
+  let y = section(z, 3) + ry * Math.sin(angle);
+  const rear = smooth(0.25, 0.78, z);
+  y -= 0.016 * Math.exp(-((x / 0.16) ** 2)) * rear * smooth(0.87, 1.20, y);
+  y += 0.073 * smooth(0.08, 0.60, z) * (1 - smooth(0.53, 0.80, y));
+  const cleft = 0.048 * Math.exp(-((x / 0.115) ** 2)) * rear * (1 - smooth(0.75, 1.02, y));
+  return vec(x, y, z - cleft);
+}, 80, 72, 0, 28500, 'body');
+
+// The dissolving loin has sparse, volumetric undercoat, not a visible end cap.
+// These hair-only sections prevent the front view becoming a hollow tube; their
+// density fades continuously, and no disk or cutting plane is ever rendered.
+for (let layer = 0; layer < 10; layer++) {
+  const z = mix(-0.87, -1.55, layer / 9);
+  surface((u, v) => {
+    const angle = u * TAU, r = clamp(v);
+    return vec(section(z, 1) * r * Math.cos(angle), section(z, 3) + section(z, 2) * r * Math.sin(angle), z);
+  }, 40, 16, 0, 1100, 'volume', null, true);
+}
+
+const rest = [];
+function kneeFor(hip, hock, upper = 0.36, lower = 0.315) {
+  const delta = hock.clone().sub(hip), d = clamp(delta.length(), 0.05, upper + lower - 0.001);
+  const axis = delta.normalize();
+  const bend = vec(0, 0, -1).addScaledVector(axis, axis.z).normalize();
+  const along = (upper * upper - lower * lower + d * d) / (2 * d);
+  return hip.clone().addScaledVector(axis, along).addScaledVector(bend, Math.sqrt(Math.max(0, upper * upper - along * along)));
+}
+function segmentShape(a, b, rx, rz, part, hairs, type) {
+  const middle = a.clone().add(b).multiplyScalar(0.5);
+  const q = new THREE.Quaternion().setFromUnitVectors(vec(0, 1, 0), a.clone().sub(b).normalize());
+  const r = vec(rx, a.distanceTo(b) * 0.66, rz);
+  surface((u, v) => {
+    const theta = v * Math.PI, phi = u * TAU;
+    return vec(r.x * Math.sin(theta) * Math.cos(phi), r.y * Math.cos(theta), r.z * Math.sin(theta) * Math.sin(phi)).applyQuaternion(q).add(middle);
+  }, 32, 20, part, hairs, type);
+}
+for (let side = -1; side <= 1; side += 2) {
+  const base = side === -1 ? 2 : 6;
+  const hip = vec(side * 0.425, 0.82, 0.20);
+  const hock = vec(side * 0.414, 0.235, 0.35);
+  const ankle = vec(side * 0.414, 0.105, 0.23);
+  const knee = kneeFor(hip, hock);
+  rest.push({ side, base, hip, knee, hock, ankle });
+  ellipsoid(vec(side * 0.405, 0.655, 0.403), vec(0.277, 0.332, 0.265), base, 11200, 'pants', (p, theta) => {
+    const fullness = 0.73 + 0.27 * smooth(0.33, 0.73, p.y);
+    const centerX = side * mix(0.414, 0.351, smooth(0.35, 0.80, p.y));
+    p.x = centerX + (p.x - side * 0.405) * fullness;
+    const centerZ = mix(0.18, 0.397, smooth(0.33, 0.88, p.y));
+    p.z = centerZ + (p.z - 0.403) * (0.76 + 0.24 * smooth(0.37, 0.76, p.y));
+    p.z += 0.042 * Math.sin(theta) ** 2 * smooth(0.28, 0.52, p.z);
+    p.x += side * 0.012 * Math.sin(theta) ** 2;
+    return p;
+  });
+  segmentShape(knee, hock, 0.102, 0.115, base + 1, 2600, 'leg');
+  ellipsoid(hock, vec(0.102, 0.102, 0.095), base + 1, 900, 'leg');
+  segmentShape(hock, ankle, 0.077, 0.077, base + 2, 1400, 'leg');
+  ellipsoid(vec(side * 0.414, 0.084, 0.17), vec(0.142, 0.076, 0.185), base + 3, 1900, 'paw', p => {
+    p.y = Math.max(0.014, p.y);
+    if (p.z < 0.075) p.z += 0.008 * Math.cos((p.x - side * 0.414) * 68);
+    return p;
+  });
+  for (let toe = 0; toe < 4; toe++) {
+    const x = side * 0.414 + (toe - 1.5) * 0.063;
+    const z = -0.003 + Math.abs(toe - 1.5) * 0.009;
+    ellipsoid(vec(x, 0.057, z), vec(0.039, 0.042, 0.066), base + 3, 290, 'paw');
+    ellipsoid(vec(x, 0.039, z - 0.056), vec(0.0105, 0.009, 0.022), base + 3, 0, 'paw', null, linear('#766556'));
+  }
+}
+ellipsoid(vec(0, 1.053, 0.672), vec(0.047, 0.050, 0.064), 10, 750, 'tail', p => {
+  p.y += (p.z - 0.665) * 0.30;
+  return p;
+});
+
+// Skin and all coat roots share the same articulated transforms. The front of
+// this rear-half study dissolves into individual hairs, with no cut-off cap.
+const transformGLSL = `
+  uniform mat4 uBones[11];
+  uniform vec3 uLag[3];
+  attribute float aPart;
+  attribute float aFade;
+  varying float vFade;
+  vec4 posed(vec3 p, float part) {
+    int b = int(part + 0.5);
+    vec4 r = uBones[b] * vec4(p, 1.0);
+    if (b == 0) {
+      float front = 1.0 - smoothstep(-1.15, 0.20, p.z);
+      r = mix(r, uBones[1] * vec4(p, 1.0), front * 0.88);
+    }
+    if (b == 2 || b == 6) r.xyz += uLag[b == 2 ? 1 : 2] * 0.11;
+    return r;
+  }
+  vec3 posedNormal(vec3 n, vec3 p, float part) {
+    int b = int(part + 0.5);
+    vec3 r = mat3(uBones[b]) * n;
+    if (b == 0) {
+      float front = 1.0 - smoothstep(-1.15, 0.20, p.z);
+      r = mix(r, mat3(uBones[1]) * n, front * 0.88);
+    }
+    return normalize(r);
+  }
+`;
+function skinShader(shader, depth = false) {
+  Object.assign(shader.uniforms, uniforms);
+  shader.vertexShader = transformGLSL + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = posed(position, aPart).xyz; vFade = aFade;');
+  if (!depth) shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = posedNormal(normal, position, aPart);');
+  shader.fragmentShader = 'varying float vFade;\n' + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', depth ? `
+    #include <alphatest_fragment>
+    float stipple = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (vFade < stipple) discard;
+  ` : `
+    #include <alphatest_fragment>
+    diffuseColor.a *= vFade;
+    if (diffuseColor.a < 0.001) discard;
+  `);
+}
+const skinGeometry = new THREE.BufferGeometry();
+skinGeometry.setAttribute('position', new THREE.Float32BufferAttribute(skinPositions, 3));
+skinGeometry.setAttribute('normal', packedAttribute(skinNormals, 3, true));
+skinGeometry.setAttribute('color', packedAttribute(skinColors, 3));
+skinGeometry.setAttribute('aPart', new THREE.BufferAttribute(new Uint8Array(skinParts), 1));
+skinGeometry.setAttribute('aFade', packedAttribute(skinFades, 1));
+skinGeometry.setIndex(skinIndices);
+const skinMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, transparent: true });
+skinMaterial.onBeforeCompile = shader => skinShader(shader);
+const skin = new THREE.Mesh(skinGeometry, skinMaterial);
+skin.castShadow = true; skin.receiveShadow = true; skin.frustumCulled = false;
+const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+depthMaterial.onBeforeCompile = shader => skinShader(shader, true);
+skin.customDepthMaterial = depthMaterial;
+scene.add(skin);
+
+// Curved, tapered, camera-facing fins. Every strand has its own root, grooming,
+// pigment and length; longer breeches have three bend segments, not spikes.
+const roots = [], normals = [], axes = [], data = [], curves = [], hairColors = [], parts = [], fades = [], hairIndices = [];
+function addFur(s) {
+  const areas = [], triangles = [];
+  let totalArea = 0;
+  for (let i = 0; i < s.index.length; i += 3) {
+    const ia = s.index[i] * 3, ib = s.index[i + 1] * 3, ic = s.index[i + 2] * 3;
+    const ab = vec(s.p[ib] - s.p[ia], s.p[ib + 1] - s.p[ia + 1], s.p[ib + 2] - s.p[ia + 2]);
+    const ac = vec(s.p[ic] - s.p[ia], s.p[ic + 1] - s.p[ia + 1], s.p[ic + 2] - s.p[ia + 2]);
+    const area = ab.cross(ac).length() * 0.5;
+    if (area > 1e-10) { totalArea += area; areas.push(totalArea); triangles.push([ia, ib, ic]); }
+  }
+  for (let h = 0; h < s.hairs; h++) {
+    const pick = random() * totalArea;
+    let lo = 0, hi = areas.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (areas[mid] < pick) lo = mid + 1; else hi = mid; }
+    const [ia, ib, ic] = triangles[lo];
+    const r = Math.sqrt(random()), t = random();
+    const weights = [1 - r, r * (1 - t), r * t];
+    const p = vec(), n = vec();
+    for (let k = 0; k < 3; k++) {
+      const i = [ia, ib, ic][k], w = weights[k];
+      p.x += s.p[i] * w; p.y += s.p[i + 1] * w; p.z += s.p[i + 2] * w;
+      n.x += s.n[i] * w; n.y += s.n[i + 1] * w; n.z += s.n[i + 2] * w;
+    }
+    n.normalize();
+    if (s.type === 'volume') n.set(p.x * 0.7, (p.y - 0.89) * 1.05, -0.90).normalize();
+    const variation = random(), lengthRandom = random(), widthRandom = random(), curlRandom = random(), keep = random();
+    const fade = s.part <= 1 ? smooth(-1.68, -0.89, p.z) : 1;
+    if (keep > fade) continue;
+    let length, width, groom;
+    if (s.type === 'volume') {
+      length = 0.038 + lengthRandom * 0.041;
+      width = 0.0045 + widthRandom * 0.0025;
+      groom = vec(n.x * 0.35, -0.64, -0.28);
+    } else if (s.type === 'pants') {
+      length = 0.070 + lengthRandom ** 0.8 * 0.079;
+      length *= 0.91 + noise(p.x * 1.7, p.y * 1.7, p.z * 1.7) * 0.20;
+      groom = vec(Math.sign(p.x) * 0.15, -0.92, 0.20);
+      width = 0.0030 + widthRandom * 0.0021;
+    } else if (s.type === 'leg') {
+      length = 0.020 + lengthRandom * 0.022; width = 0.0017 + widthRandom * 0.0016;
+      groom = vec(Math.sign(p.x) * 0.04, -0.85, 0.09);
+    } else if (s.type === 'paw') {
+      length = 0.010 + lengthRandom * 0.018; width = 0.0016 + widthRandom * 0.0014;
+      groom = vec(0, -0.10, -0.45);
+    } else if (s.type === 'tail') {
+      length = 0.023 + lengthRandom * 0.023; width = 0.0024 + widthRandom * 0.0015;
+      groom = vec(0, 0.35, 0.43);
+    } else {
+      length = 0.026 + lengthRandom * 0.029; width = 0.0028 + widthRandom * 0.0020;
+      const back = smooth(0.30, 0.75, n.z);
+      groom = vec(Math.sign(p.x) * back * 0.12, -0.32 * (1 - smooth(0.2, 0.8, n.y)) - back * 0.42, 0.47);
+    }
+    // A fine undercoat and a sparse longer guard coat share coherent clumps.
+    if (variation > 0.93) { length *= 1.45; width *= 0.57; }
+    else if (variation < 0.19) { length *= 0.66; width *= 1.65; }
+    const axis = n.clone().multiplyScalar(s.type === 'pants' ? 0.58 : 0.64).addScaledVector(groom, 0.79);
+    axis.x += noise(p.x * 2.8, p.y * 2.8, p.z * 2.8) * 0.13;
+    axis.z += noise(p.z * 2.4, p.x * 2.4, p.y * 2.4) * 0.09;
+    axis.normalize(); p.addScaledVector(n, 0.0012);
+    const color = pigment(p.x, p.y, p.z, s.part, variation);
+    const segments = s.type === 'pants' ? 3 : 2;
+    const start = roots.length / 3;
+    for (let j = 0; j <= segments; j++) for (let edge = -1; edge <= 1; edge += 2) {
+      roots.push(p.x, p.y, p.z); normals.push(n.x, n.y, n.z); axes.push(axis.x, axis.y, axis.z);
+      data.push(length, width, curlRandom, variation);
+      curves.push(j / segments, edge); hairColors.push(...color); parts.push(s.part); fades.push(fade);
+    }
+    for (let j = 0; j < segments; j++) {
+      const v = start + j * 2; hairIndices.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
+    }
+  }
+}
+for (const s of surfaces) addFur(s);
+const furGeometry = new THREE.BufferGeometry();
+furGeometry.setAttribute('position', new THREE.Float32BufferAttribute(roots, 3));
+furGeometry.setAttribute('normal', packedAttribute(normals, 3, true));
+furGeometry.setAttribute('aAxis', packedAttribute(axes, 3, true));
+furGeometry.setAttribute('aData', new THREE.Float32BufferAttribute(data, 4));
+furGeometry.setAttribute('aCurve', packedAttribute(curves, 2, true));
+furGeometry.setAttribute('color', packedAttribute(hairColors, 3));
+furGeometry.setAttribute('aPart', new THREE.BufferAttribute(new Uint8Array(parts), 1));
+furGeometry.setAttribute('aFade', packedAttribute(fades, 1));
+furGeometry.setIndex(hairIndices);
+const furMaterial = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 1, metalness: 0,
+  side: THREE.DoubleSide, alphaToCoverage: true
+});
+furMaterial.onBeforeCompile = shader => {
+  Object.assign(shader.uniforms, uniforms);
+  shader.vertexShader = transformGLSL + `
+    uniform float uTime;
+    attribute vec3 aAxis;
+    attribute vec4 aData;
+    attribute vec2 aCurve;
+    varying vec2 vCurve;
+    varying float vVariation;
+  ` + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = posedNormal(normal, position, aPart);');
+  shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      float t = aCurve.x;
+      int b = int(aPart + 0.5);
+      vec3 root = posed(position, aPart).xyz;
+      vec3 N = objectNormal;
+      vec3 T = posedNormal(aAxis, position, aPart);
+      vec3 lag = uLag[0];
+      if (b == 2) lag = uLag[1];
+      if (b == 6) lag = uLag[2];
+      if (b == 3 || b == 4 || b == 5 || b == 7 || b == 8 || b == 9) lag *= 0.12;
+      vec3 bend = vec3(sin(aData.z * 31.0), -0.38, cos(aData.z * 23.0));
+      vec3 curl = bend * aData.x * 0.13 * sin(t * 2.8) * t;
+      vec3 flutter = N * sin(uTime * 2.4 + aData.z * 19.0 + position.y * 9.0) * 0.002 * t * t;
+      vec3 center = root + T * aData.x * t + curl + lag * t * t + flutter;
+      vec3 tangent = normalize(T + bend * 0.16 + lag * t / max(0.03, aData.x));
+      vec3 view = normalize(cameraPosition - center);
+      vec3 side = normalize(cross(tangent, view));
+      float width = aData.y * pow(max(0.0, 1.0 - t), 0.65) * (0.79 + 0.21 * sin(t * 3.14159));
+      vec3 transformed = center + side * width * aCurve.y;
+      vCurve = aCurve; vVariation = aData.w; vFade = aFade;
+  `);
+  shader.fragmentShader = `
+    varying vec2 vCurve;
+    varying float vVariation;
+    varying float vFade;
+  ` + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+      #include <color_fragment>
+      diffuseColor.rgb *= (0.95 + 0.065 * vCurve.x + 0.035 * vVariation);
+  `);
+  shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `
+      #include <alphatest_fragment>
+      float edge = 1.0 - smoothstep(0.30, 1.0, abs(vCurve.y));
+      float tip = 1.0 - smoothstep(0.88, 1.0, vCurve.x);
+      diffuseColor.a *= edge * tip * vFade;
+      if (diffuseColor.a < 0.045) discard;
+  `);
+  // Fin winding is camera dependent; shading uses the follicle's outward normal
+  // on either face, not the fin's arbitrary front/back orientation.
+  shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `
+      #include <normal_fragment_begin>
+      #ifdef DOUBLE_SIDED
+        normal *= faceDirection;
+      #endif
+  `);
+};
+const fur = new THREE.Mesh(furGeometry, furMaterial);
+fur.frustumCulled = false; fur.receiveShadow = true; scene.add(fur);
+// The immutable GPU buffers own the data now; discard construction scratch.
+for (const a of [skinPositions, skinNormals, skinColors, skinParts, skinFades, skinIndices,
+  roots, normals, axes, data, curves, hairColors, parts, fades, hairIndices, surfaces]) a.length = 0;
+
+const pawContacts = [new THREE.Vector4(-0.414, 0.17, 0, 0), new THREE.Vector4(0.414, 0.17, 0, 0)];
+const softShadows = Array.from({ length: 5 }, () => new THREE.Vector4());
+const floorMaterial = new THREE.MeshStandardMaterial({ color: '#e0dbd2', roughness: 1 });
+floorMaterial.onBeforeCompile = shader => {
+  shader.uniforms.uContacts = { value: pawContacts };
+  shader.uniforms.uSoftShadows = { value: softShadows };
+  shader.vertexShader = 'varying vec3 vFloor;\n' + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvFloor = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  shader.fragmentShader = 'uniform vec4 uContacts[2];\nuniform vec4 uSoftShadows[5];\nvarying vec3 vFloor;\n' + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+    #include <color_fragment>
+    float contact = 0.0;
+    for (int i = 0; i < 2; i++) {
+      vec2 p = (vFloor.xz - uContacts[i].xy) / vec2(0.17, 0.24);
+      contact += exp(-dot(p, p) * 2.7) * 0.39 * exp(-uContacts[i].z * 18.0);
+    }
+    float transmission = 1.0;
+    for (int i = 0; i < 5; i++) {
+      vec2 d = (vFloor.xz - uSoftShadows[i].xy) / uSoftShadows[i].zw;
+      float density = i < 3 ? 0.25 : 0.25;
+      transmission *= 1.0 - exp(-dot(d, d) * 1.6) * density;
+    }
+    diffuseColor.rgb *= transmission * (1.0 - min(0.42, contact));
+  `);
+};
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), floorMaterial);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = false; floor.position.y = -0.002;
+scene.add(floor);
+
+// Invisible anatomical hit volumes follow the actual pose, not shader-only
+// vertices. A centre tap in the initial framing intersects the pelvis.
+const hitMaterial = new THREE.MeshBasicMaterial({ visible: false });
+const hitSphere = new THREE.SphereGeometry(1, 24, 16);
+const hitVolumes = [];
+function hitVolume(center, scale, part) {
+  const m = new THREE.Mesh(hitSphere, hitMaterial);
+  m.matrixAutoUpdate = false;
+  const local = new THREE.Matrix4().compose(center, new THREE.Quaternion(), scale);
+  hitVolumes.push({ m, local, part }); scene.add(m);
+}
+hitVolume(vec(0, 0.86, -0.12), vec(0.65, 0.48, 0.96), 0);
+hitVolume(vec(0, 0.89, -1.01), vec(0.49, 0.38, 0.49), 1);
+for (const r of rest) {
+  hitVolume(vec(r.side * 0.405, 0.64, 0.37), vec(0.30, 0.39, 0.31), r.base);
+  hitVolume(vec(r.side * 0.414, 0.10, 0.15), vec(0.17, 0.13, 0.26), r.base + 3);
+}
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+function hitsDog(e) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.intersectObjects(hitVolumes.map(h => h.m), false).length > 0;
+}
+let down = null;
+canvas.addEventListener('pointerdown', e => {
+  if (e.isPrimary && (e.button === 0 || e.pointerType !== 'mouse')) {
+    down = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    canvas.style.cursor = 'grabbing';
+  } else if (down && e.pointerType !== 'mouse') down.moved = true;
+});
+canvas.addEventListener('pointermove', e => {
+  if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) down.moved = true;
+  if (!down && e.pointerType === 'mouse') canvas.style.cursor = hitsDog(e) ? 'pointer' : 'grab';
+});
+canvas.addEventListener('pointercancel', () => { down = null; canvas.style.cursor = 'grab'; });
+canvas.addEventListener('pointerup', e => {
+  if (!down || down.id !== e.pointerId) return;
+  const click = !down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6;
+  down = null;
+  canvas.style.cursor = e.pointerType === 'mouse' && hitsDog(e) ? 'pointer' : 'grab';
+  if (!click) return;
+  if (hitsDog(e)) triggerWiggle();
+});
+
+// Randomized idle plans are fixed at load: waiting longer does not consume the
+// click stream or change the reproducible sequence of wiggle choices.
+const idlePlans = [];
+let idlePeriod = 0;
+for (let i = 0; i < 8; i++) {
+  idlePeriod += 3.5 + random() * 3.5;
+  const duration = 1.25 + random() * 1.35;
+  idlePlans.push({ start: idlePeriod, duration, side: random() < 0.5 ? -1 : 1, strength: 0.011 + random() * 0.016 });
+  idlePeriod += duration;
+}
+idlePeriod += 4;
+const breathPhase = random() * TAU, breathRate = 1.20 + random() * 0.25;
+let active = null, lastType = -1, excitement = 0, lastClick = -100, clicks = 0;
+let elapsed = 0;
+const blankPose = () => ({ x: 0, y: 0, z: 0, roll: 0, yaw: 0, pitch: 0, frontX: 0, frontYaw: 0, leftLift: 0, rightLift: 0 });
+let previousEventPose = blankPose();
+function triggerWiggle() {
+  const type = lastType < 0 ? Math.floor(random() * 4) : (lastType + 1 + Math.floor(random() * 3)) % 4;
+  const gap = elapsed - lastClick;
+  excitement = clamp(excitement + (gap < 0.9 ? 0.47 : 0.24), 0, 1.7);
+  const speed = (0.90 + random() * 0.23) * (1 + excitement * 0.24);
+  const duration = [1.22, 2.30, 1.52, 1.45][type] * (0.90 + random() * 0.20) / speed;
+  active = {
+    type, start: elapsed, duration,
+    amplitude: (0.91 + random() * 0.20) * (1 + excitement * 0.33),
+    cycles: [3.5, 1.3, 5.3, 1][type] * (0.91 + random() * 0.19),
+    phase: random() * 0.42 - 0.21,
+    lead: random() < 0.5 ? -1 : 1,
+    from: { ...previousEventPose }
+  };
+  lastType = type; lastClick = elapsed;
+  canvas.dataset.wiggle = ['happy', 'loaf', 'shimmy', 'hop'][type];
+  canvas.dataset.clicks = String(++clicks);
+}
+function eventPose() {
+  const p = blankPose();
+  if (!active) return p;
+  const t = clamp((elapsed - active.start) / active.duration);
+  const a = active.amplitude, s = active.lead;
+  const env = Math.sin(Math.PI * t) ** 0.85;
+  const phase = TAU * (active.cycles * t + (active.type === 0 ? 0.18 * t * t : 0)) + active.phase;
+  if (active.type === 0) {
+    p.x = 0.090 * Math.sin(phase) * env * a * s;
+    p.yaw = 0.125 * Math.sin(phase + 0.40) * env * a * s;
+    p.roll = -0.042 * Math.sin(phase - 0.20) * env * a * s;
+    p.y = 0.015 * (1 - Math.cos(phase * 2)) * env * a;
+    p.frontX = 0.018 * Math.sin(phase - 0.75) * env * a * s;
+    p.frontYaw = -p.yaw * 0.30;
+  } else if (active.type === 1) {
+    const loaf = Math.sin(phase) * (0.86 + 0.14 * Math.cos(phase * 2));
+    p.x = 0.132 * loaf * env * a * s;
+    p.roll = -0.085 * Math.sin(phase - 0.2) * env * a * s;
+    p.yaw = 0.055 * Math.sin(phase + 0.4) * env * a * s;
+    p.y = -0.018 * Math.sin(phase) ** 2 * env * a;
+    p.frontX = -p.x * 0.15; p.frontYaw = -p.yaw * 0.5;
+  } else if (active.type === 2) {
+    p.x = 0.071 * Math.sin(phase) * env * a * s;
+    p.yaw = 0.120 * Math.sin(phase + 0.65) * env * a * s;
+    p.roll = 0.032 * Math.sin(phase * 2) * env * a;
+    p.pitch = 0.031 * Math.sin(phase - 0.35) * env * a;
+    p.y = (-0.031 + 0.017 * Math.cos(phase * 2)) * env * a;
+    p.z = 0.018 * Math.sin(phase * 2) * env * a;
+    p.frontX = -0.037 * Math.sin(phase - 0.45) * env * a * s;
+    p.frontYaw = -p.yaw * 0.62;
+    p.leftLift = 0.018 * Math.max(0, Math.sin(phase)) ** 3 * env;
+    p.rightLift = 0.018 * Math.max(0, -Math.sin(phase)) ** 3 * env;
+  } else {
+    const crouch = Math.sin(Math.PI * clamp(t / 0.30)) ** 2;
+    const hop = Math.sin(Math.PI * clamp((t - 0.28) / 0.30)) ** 1.3;
+    const settleTime = Math.max(0, t - 0.58);
+    const settle = Math.sin(settleTime * 28) * Math.exp(-settleTime * 9) * smooth(0.58, 0.61, t);
+    p.y = (-0.062 * crouch + 0.115 * hop - 0.037 * settle) * a;
+    p.x = (-0.027 * crouch + 0.046 * Math.sin(t * TAU * 1.7) * env) * a * s;
+    p.pitch = (-0.028 * crouch + 0.028 * hop) * a;
+    p.roll = 0.030 * Math.sin(t * TAU * 1.8) * env * a * s;
+    p.yaw = 0.064 * Math.sin(t * TAU * 1.4) * env * a * s;
+    p.leftLift = 0.103 * hop * a;
+    p.rightLift = 0.103 * hop * a;
+    p.frontX = -p.x * 0.2; p.frontYaw = p.yaw * 0.4;
+  }
+  const blend = smooth(0, 0.12, elapsed - active.start);
+  for (const key of Object.keys(p)) p[key] = mix(active.from[key], p[key], blend);
+  if (t >= 1) active = null;
+  return p;
+}
+
+const pelvisPivot = vec(0, 0.84, 0.17), frontPivot = vec(0, 0.87, -0.75);
+const unitScale = vec(1, 1, 1), q = new THREE.Quaternion(), euler = new THREE.Euler();
+const tempMatrix = new THREE.Matrix4();
+function pivotMatrix(out, pivot, translation, rx, ry, rz) {
+  q.setFromEuler(euler.set(rx, ry, rz, 'YXZ'));
+  out.compose(pivot.clone().add(translation), q, unitScale);
+  out.multiply(tempMatrix.makeTranslation(-pivot.x, -pivot.y, -pivot.z));
+}
+function segmentMatrix(out, oldA, oldB, newA, newB) {
+  q.setFromUnitVectors(oldB.clone().sub(oldA).normalize(), newB.clone().sub(newA).normalize());
+  out.compose(newA, q, unitScale);
+  out.multiply(tempMatrix.makeTranslation(-oldA.x, -oldA.y, -oldA.z));
+}
+const springs = Array.from({ length: 3 }, () => ({ x: vec(), velocity: vec(), last: vec(), initialized: false }));
+function springStep(spring, source, dt, index) {
+  if (!spring.initialized) { spring.last.copy(source); spring.initialized = true; }
+  const target = source.clone().sub(spring.last).multiplyScalar(-0.066 / Math.max(0.001, dt));
+  target.clampLength(0, index === 0 ? 0.08 : 0.115);
+  spring.last.copy(source);
+  const stiffness = index === 0 ? 150 : 104, damping = index === 0 ? 15 : 10;
+  const steps = Math.max(1, Math.ceil(dt / (1 / 120))), h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    spring.velocity.addScaledVector(target.clone().sub(spring.x), stiffness * h);
+    spring.velocity.multiplyScalar(Math.exp(-damping * h));
+    spring.x.addScaledVector(spring.velocity, h);
+  }
+  spring.x.clampLength(0, index === 0 ? 0.085 : 0.12);
+  lags[index].copy(spring.x);
+}
+function animateDog(dt) {
+  excitement *= Math.exp(-dt / 2.35);
+  const p = eventPose(); previousEventPose = { ...p };
+  const breathe = Math.sin(elapsed * breathRate + breathPhase);
+  let shift = 0;
+  const it = elapsed % idlePeriod;
+  for (const plan of idlePlans) {
+    const progress = (it - plan.start) / plan.duration;
+    if (progress > 0 && progress < 1) shift = Math.sin(Math.PI * progress) ** 2 * plan.strength * plan.side;
+  }
+  p.x += 0.006 * Math.sin(elapsed * 0.71 + phases[7]) + shift;
+  p.y += 0.006 * breathe;
+  p.roll += -shift * 0.43 + 0.003 * Math.sin(elapsed * 0.84 + phases[8]);
+  p.yaw += 0.008 * Math.sin(elapsed * 0.59 + phases[9]);
+  pivotMatrix(bones[0], pelvisPivot, vec(p.x, p.y, p.z), p.pitch, p.yaw, p.roll);
+  // A wide, excited sway bends the standing legs instead of stretching a shin
+  // or dragging a planted foot. Lower the pelvis just enough for both IK chains.
+  let settleHeight = 0;
+  for (let i = 0; i < rest.length; i++) {
+    const r = rest[i], hip = r.hip.clone().applyMatrix4(bones[0]);
+    const lift = i === 0 ? p.leftLift : p.rightLift;
+    const dx = hip.x - r.hock.x, dz = hip.z - r.hock.z;
+    const reachableY = r.hock.y + lift + Math.sqrt(Math.max(0.01, 0.663 ** 2 - dx * dx - dz * dz));
+    settleHeight = Math.max(settleHeight, hip.y - reachableY);
+  }
+  if (settleHeight > 0) {
+    p.y -= settleHeight;
+    pivotMatrix(bones[0], pelvisPivot, vec(p.x, p.y, p.z), p.pitch, p.yaw, p.roll);
+  }
+  pivotMatrix(bones[1], frontPivot, vec(p.frontX + p.x * 0.16, p.y * 0.48, p.z * 0.3), p.pitch * 0.7, p.frontYaw, p.roll * 0.23);
+  bones[10].copy(bones[0]);
+  for (let i = 0; i < 3; i++) {
+    const shadow = vec(0, 0.85, -0.77 + i * 0.55).applyMatrix4(i === 0 ? bones[1] : bones[0]);
+    softShadows[i].set(shadow.x + shadow.y * 0.48, shadow.z - shadow.y * 0.60, 0.70, 0.61);
+  }
+  springStep(springs[0], vec(0, 0.87, 0.65).applyMatrix4(bones[0]), dt, 0);
+  for (let i = 0; i < rest.length; i++) {
+    const r = rest[i], lift = i === 0 ? p.leftLift : p.rightLift;
+    const footOffset = vec(0, lift, 0);
+    const hip = r.hip.clone().applyMatrix4(bones[0]);
+    const hock = r.hock.clone().add(footOffset);
+    const ankle = r.ankle.clone().add(footOffset);
+    const knee = kneeFor(hip, hock);
+    segmentMatrix(bones[r.base], r.hip, r.knee, hip, knee);
+    segmentMatrix(bones[r.base + 1], r.knee, r.hock, knee, hock);
+    segmentMatrix(bones[r.base + 2], r.hock, r.ankle, hock, ankle);
+    bones[r.base + 3].makeTranslation(0, lift, 0);
+    springStep(springs[i + 1], vec(r.side * 0.405, 0.67, 0.49).applyMatrix4(bones[r.base]), dt, i + 1);
+    pawContacts[i].set(r.side * 0.414, 0.17, lift, 0);
+    const shadow = vec(r.side * 0.405, 0.51, 0.35).applyMatrix4(bones[r.base]);
+    softShadows[i + 3].set(shadow.x + shadow.y * 0.48, shadow.z - shadow.y * 0.60, 0.40, 0.35);
+  }
+  for (const h of hitVolumes) {
+    h.m.matrix.multiplyMatrices(bones[h.part], h.local);
+    h.m.updateMatrixWorld(true);
+  }
+  uniforms.uTime.value = elapsed;
+}
+
+let width = 0, height = 0;
+function resize() {
+  const w = Math.max(1, document.documentElement.clientWidth), h = Math.max(1, document.documentElement.clientHeight);
+  if (w === width && h === height) return;
+  width = w; height = h;
+  renderer.setSize(w, h, false); camera.aspect = w / h;
+  // Keep the whole study visible if embedded in a narrower-than-square frame.
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(19.5 * Math.PI / 180) / Math.min(1, camera.aspect)));
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(document.documentElement);
+resize();
+let lastFrame = performance.now(), performanceTime = 0, performanceFrames = 0, slowWindows = 0;
+let quality = 2;
+document.addEventListener('visibilitychange', () => { lastFrame = performance.now(); });
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (document.hidden) return;
+  const rawDt = (now - lastFrame) / 1000;
+  const dt = Math.min(0.045, Math.max(0.001, rawDt));
+  lastFrame = now; elapsed += dt;
+  controls.update();
+  const highView = smooth(35 * Math.PI / 180, 70 * Math.PI / 180, Math.PI / 2 - controls.getPolarAngle());
+  focus.set(0, mix(0.66, 0.74, highView), mix(-0.34, -0.42, highView));
+  camera.lookAt(focus);
+  animateDog(dt);
+  renderer.render(scene, camera);
+  // Never lower reference quality for startup/shader compilation or an isolated
+  // missed frame. Only sustained sub-30 fps rendering on slower hardware adapts.
+  if (elapsed > 12 && rawDt < 0.20) {
+    performanceTime += rawDt; performanceFrames++;
+    if (performanceTime > 4) {
+      slowWindows = performanceFrames / performanceTime < 29 ? slowWindows + 1 : 0;
+      if (slowWindows >= 2 && quality > 1) {
+        quality -= 0.5;
+        renderer.setPixelRatio(Math.min(devicePixelRatio || 1, quality));
+        renderer.setSize(width, height, false);
+        slowWindows = 0;
+      }
+      performanceTime = 0; performanceFrames = 0;
+    }
+  }
+}
+animateDog(1 / 60);
+renderer.compile(scene, camera);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
