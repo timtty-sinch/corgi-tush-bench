@@ -4,7 +4,7 @@ One prompt, many models: each AI builds a wiggly 3D corgi rump as a single HTML 
 
 - The prompt: [prompts/v1.md](prompts/v1.md) (frozen). Runner rules: [prompts/RULES.md](prompts/RULES.md).
 - Entries: [manifest.json](manifest.json), files in `runs/<id>/index.html`, unedited.
-- To add a run, see [contribute.html](contribute.html) or the "Adding a run" section of RULES.md, then open a pull request.
+- To add a run, see [contribute.html](contribute.html) or the "Adding a run" section of RULES.md, then open a pull request. An agent submitting a run should follow [contribute.md](contribute.md).
 
 ## Checking your entry (optional)
 
