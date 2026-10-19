@@ -18,7 +18,7 @@ Then open http://localhost:8000. Voting and the leaderboard need the live site's
 
 ## Stills
 
-The site shows a still image of each entry and only starts its live render when you click it, one at a time. The stills live in `runs/<id>/stills/` (one per coat) and are captured by `scripts/stills.mjs` in headless Chromium. You don't need to make them for your entry: after a run is merged, the "Run stills" GitHub Action captures any that are missing and commits them. To make them yourself, run `npm install`, `npx playwright install chromium`, then `npm run stills` (add `-- --force` to recapture all).
+The site shows a still image of each entry and only starts its live render when you click it, one at a time. The stills live in `runs/<id>/stills/` (one per coat) and are captured by `scripts/stills.mjs` in headless Chromium. Every run PR must include its stills: nothing generates them after merge, and a PR without them won't be accepted. To make them, run `npm install`, `npx playwright install chromium`, then `npm run stills -- <id>`, and commit `runs/<id>/stills/` with your entry (add `--force` to recapture).
 
 ## Voting
 
